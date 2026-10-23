@@ -39,6 +39,10 @@ class OneDriveError(ExportError):
     pass
 
 
+class WorkbookLocked(OneDriveError):
+    """Excel has the file open, so replacing the whole workbook was refused."""
+
+
 def target_url() -> str:
     if URL_FILE.is_file():
         for line in URL_FILE.read_text(encoding="utf-8-sig").splitlines():
@@ -85,14 +89,26 @@ def publish(archive, url: str = "") -> dict:
         item = _resolve(token, url)
         original = _download(token, item)
         stamp = datetime.now().strftime("bta-%m%d-%H%M")
-        if original.startswith(b"PK"):
-            return _publish_zip(token, item, archive, stamp, original, url)
-        if original.startswith(_OLE):
-            return _publish_protected(token, item, archive, stamp, url)
-        detail = _readable_body(original)
-        if detail:
-            raise OneDriveError(f"OneDrive did not return an Excel workbook: {detail}")
-        raise OneDriveError("OneDrive did not return an Excel workbook, so no tab was added.")
+        return _open_for_edit(
+            original,
+            lambda: _publish_zip(token, item, archive, stamp, original, url),
+            lambda: _publish_protected(token, item, archive, stamp, url),
+        )
+
+
+def _open_for_edit(original: bytes, zip_add, excel_add):
+    """A locked xlsx is edited through Excel instead of being replaced."""
+    if original.startswith(b"PK"):
+        try:
+            return zip_add()
+        except WorkbookLocked:
+            return excel_add()
+    if original.startswith(_OLE):
+        return excel_add()
+    detail = _readable_body(original)
+    if detail:
+        raise OneDriveError(f"OneDrive did not return an Excel workbook: {detail}")
+    raise OneDriveError("OneDrive did not return an Excel workbook, so no tab was added.")
 
 
 def _access_token() -> str:
@@ -417,7 +433,7 @@ def _upload(token: str, item: dict, content: bytes, ) -> dict:
     if status == 412:
         raise OneDriveError("The workbook changed while the sheet was being added. Try again.")
     if status == 423:
-        raise OneDriveError("The workbook is locked in Excel. Close it, or try again in a moment.")
+        raise WorkbookLocked("The workbook is locked in Excel. Close it, or try again in a moment.")
     raise OneDriveError(_http_message(status, body) or f"upload failed ({status})")
 
 

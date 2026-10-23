@@ -17,7 +17,15 @@ from tracker.excel_push import describe, place_request
 from tracker.export_xlsx import append_workbook, workbook_bytes
 from tracker.fsview import list_dir
 from tracker.ingest import scan_path
-from tracker.onedrive import OneDriveError, _http_message, encode_share_url, file_name, remember_url
+from tracker.onedrive import (
+    OneDriveError,
+    WorkbookLocked,
+    _http_message,
+    _open_for_edit,
+    encode_share_url,
+    file_name,
+    remember_url,
+)
 from tracker.server import App, serve
 from tracker.workspace import Workspace
 
@@ -384,6 +392,23 @@ class ModelTest(unittest.TestCase):
             with self.assertRaises(OneDriveError):
                 remember_url("not a link", dest)
             self.assertTrue(dest.read_text(encoding="utf-8").strip().endswith("other.xlsx"))
+
+    def test_locked_workbook_is_edited_through_excel(self):
+        calls = []
+
+        def zip_add():
+            calls.append("zip")
+            raise WorkbookLocked("locked")
+
+        def excel_add():
+            calls.append("excel")
+            return {"sheet": "bta"}
+
+        self.assertEqual(_open_for_edit(b"PK\x03\x04rest", zip_add, excel_add)["sheet"], "bta")
+        self.assertEqual(calls, ["zip", "excel"])
+        calls.clear()
+        self.assertEqual(_open_for_edit(b"\xd0\xcf\x11\xe0rest", zip_add, excel_add)["sheet"], "bta")
+        self.assertEqual(calls, ["excel"])
 
     def test_real_directory_if_present(self):
         if not REAL.is_dir():
