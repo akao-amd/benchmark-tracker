@@ -18,7 +18,8 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from .export_xlsx import ExportError, append_workbook
+from .excel_push import describe, place_request
+from .export_xlsx import ExportError, _sheet_title, append_workbook, workbook_bytes
 
 # The shared workbook named in the request. Override with onedrive.url
 # (one URL, first line) or BENCHMARK_ONEDRIVE_URL.
@@ -31,6 +32,7 @@ URL_FILE = HERE / "onedrive.url"
 XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 GRAPH = "https://graph.microsoft.com/v1.0"
 _LOCK = threading.Lock()
+_OLE = b"\xd0\xcf\x11\xe0"
 
 
 class OneDriveError(ExportError):
@@ -72,18 +74,14 @@ def publish(archive) -> dict:
         item = _resolve(token, url)
         original = _download(token, item)
         stamp = datetime.now().strftime("bta-%m%d-%H%M")
-        try:
-            updated, sheet = append_workbook(original, archive, stamp)
-        except ExportError:
-            raise
-        except Exception as exc:
-            raise OneDriveError(f"the new sheet could not be built: {exc}") from exc
-        saved = _upload(token, item, updated)
-        return {
-            "sheet": sheet,
-            "file": saved.get("name") or item.get("name") or file_name(url),
-            "url": saved.get("webUrl") or item.get("webUrl") or "",
-        }
+        if original.startswith(b"PK"):
+            return _publish_zip(token, item, archive, stamp, original, url)
+        if original.startswith(_OLE):
+            return _publish_protected(token, item, archive, stamp, url)
+        detail = _readable_body(original)
+        if detail:
+            raise OneDriveError(f"OneDrive did not return an Excel workbook: {detail}")
+        raise OneDriveError("OneDrive did not return an Excel workbook, so no tab was added.")
 
 
 def _access_token() -> str:
@@ -162,6 +160,207 @@ def _resolve(token: str, url: str) -> dict:
     raise OneDriveError(f"{name} was not found in OneDrive. The sharing link may have expired.")
 
 
+def _publish_zip(token: str, item: dict, archive, stamp: str, original: bytes, url: str) -> dict:
+    try:
+        updated, sheet = append_workbook(original, archive, stamp)
+    except ExportError:
+        raise
+    except Exception as exc:
+        raise OneDriveError(f"the new sheet could not be built: {exc}") from exc
+    saved = _upload(token, item, updated)
+    return {
+        "sheet": sheet,
+        "file": saved.get("name") or item.get("name") or file_name(url),
+        "url": saved.get("webUrl") or item.get("webUrl") or "",
+    }
+
+
+def _publish_protected(token: str, item: dict, archive, stamp: str, url: str) -> dict:
+    """Add one sheet through Excel. The protected package is left as it is."""
+    drive = (item.get("parentReference") or {}).get("driveId")
+    item_id = item.get("id")
+    if not drive or not item_id:
+        raise OneDriveError("the OneDrive item has no drive id")
+    root = f"{GRAPH}/drives/{drive}/items/{item_id}/workbook"
+    session = _excel(token, "POST", root + "/createSession", {"persistChanges": True})
+    session_id = session.get("id") or ""
+    if not session_id:
+        raise OneDriveError("Excel did not open a session for the workbook.")
+    title = ""
+    created_name = ""
+    saved = False
+    try:
+        listed = _excel(token, "GET", root + "/worksheets", session=session_id)
+        taken = [row.get("name") for row in listed.get("value", []) if isinstance(row, dict) and row.get("name")]
+        title = _sheet_title(stamp, taken)
+        try:
+            plan = describe(workbook_bytes(archive, sheet_title=title))
+        except ExportError:
+            raise
+        except Exception as exc:
+            raise OneDriveError(f"the new sheet could not be built: {exc}") from exc
+        created = _excel(token, "POST", root + "/worksheets/add", {"name": title}, session=session_id)
+        created_name = created.get("name") or title
+        title = created_name
+        _excel(token, "PATCH", _sheet_url(root, title), place_request(title), session=session_id)
+        _write_plan(token, root, session_id, title, plan)
+        saved = True
+    except OneDriveError as exc:
+        if created_name and not saved:
+            _discard_sheet(token, root, session_id, created_name, exc)
+        raise
+    finally:
+        try:
+            _excel(token, "POST", root + "/closeSession", session=session_id)
+        except OneDriveError:
+            if saved:
+                raise
+    return {
+        "sheet": title,
+        "file": item.get("name") or file_name(url),
+        "url": item.get("webUrl") or "",
+    }
+
+
+def _discard_sheet(token: str, root: str, session_id: str, title: str, exc: OneDriveError) -> None:
+    try:
+        _excel(token, "DELETE", _sheet_url(root, title), session=session_id)
+    except OneDriveError:
+        raise OneDriveError(
+            f"{exc} Delete the tab {title} in Excel if it appeared, then try again."
+        ) from exc
+
+
+def _write_plan(token: str, root: str, session_id: str, title: str, plan: dict) -> None:
+    sheet = _sheet_url(root, title)
+    relative = sheet[len(GRAPH):]
+    for chunk in plan["chunks"]:
+        _excel(
+            token, "PATCH", f"{sheet}/range(address='{chunk['address']}')",
+            {"formulas": chunk["formulas"], "numberFormat": chunk["numberFormat"]},
+            session=session_id,
+        )
+    for kind, path in (("base_font", "/format/font"), ("base_align", "/format")):
+        base = plan.get(kind)
+        if base:
+            _excel(token, "PATCH", f"{sheet}/range(address='{base['address']}'){path}", base["body"], session=session_id)
+    calls = []
+    for item in plan["fonts"]:
+        calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format/font", item["body"]))
+    for item in plan["fills"]:
+        calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format/fill", item["body"]))
+    for item in plan["aligns"]:
+        calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format", item["body"]))
+    for item in plan["borders"]:
+        calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format/borders/{item['edge']}", item["body"]))
+    for address in plan["merges"]:
+        calls.append(("POST", f"{relative}/range(address='{address}')/merge", {}))
+    for item in plan["widths"]:
+        calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format", {"columnWidth": item["width"]}))
+    for item in plan["heights"]:
+        calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format", {"rowHeight": item["height"]}))
+    for chart in plan["charts"]:
+        calls.append(("PATCH", f"{relative}/range(address='{chart['address']}')", {"formulas": chart["formulas"]}))
+    _excel_many(token, session_id, calls)
+    for column in plan["hide"]:
+        try:
+            _excel(token, "PATCH", f"{sheet}/range(address='{column}')/format", {"columnWidth": 0}, session=session_id)
+        except OneDriveError:
+            pass
+    for chart in plan["charts"]:
+        created = _excel(
+            token, "POST", f"{sheet}/charts/add",
+            {"type": "XYScatterLines", "sourceData": chart["source"], "seriesBy": "Columns"},
+            session=session_id,
+        )
+        name = urllib.parse.quote(created.get("name") or "", safe="")
+        if chart["title"] and name:
+            _excel(token, "PATCH", f"{sheet}/charts/{name}/title", {"text": chart["title"], "visible": True}, session=session_id)
+        if name:
+            _excel(
+                token, "POST", f"{sheet}/charts/{name}/setPosition",
+                {"startCell": chart["start"], "endCell": chart["end"]},
+                session=session_id,
+            )
+            for index, color in enumerate(chart["colors"]):
+                _excel(
+                    token, "PATCH", f"{sheet}/charts/{name}/series/itemAt(index={index})/format/line",
+                    {"color": color},
+                    session=session_id,
+                )
+
+
+def _sheet_url(root: str, title: str) -> str:
+    return root + "/worksheets/" + urllib.parse.quote(title, safe="")
+
+
+def _excel(token: str, method: str, url: str, payload: dict | None = None, session: str | None = None) -> dict:
+    extra = {"Content-Type": "application/json"}
+    if session:
+        extra["workbook-session-id"] = session
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    status, _headers, body = _raw(method, url, token, data=data, extra=extra, follow=True)
+    if status in (200, 201, 204):
+        if not body:
+            return {}
+        try:
+            parsed = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    if status in (409, 423):
+        raise OneDriveError("The workbook is open in Excel and locked. Close it, or try again in a moment.")
+    raise OneDriveError(_http_message(status, body) or f"Excel could not change the workbook ({status}).")
+
+
+def _excel_many(token: str, session: str, calls: list[tuple[str, str, dict]]) -> None:
+    for start in range(0, len(calls), 20):
+        group = calls[start:start + 20]
+        if not _excel_batch(token, session, group):
+            for method, url, body in group:
+                _excel(token, method, GRAPH + url, body, session=session)
+
+
+def _excel_batch(token: str, session: str, calls: list[tuple[str, str, dict]]) -> bool:
+    payload = {
+        "requests": [
+            {
+                "id": str(index),
+                "method": method,
+                "url": url,
+                "headers": {"Content-Type": "application/json", "workbook-session-id": session},
+                "body": body,
+            }
+            for index, (method, url, body) in enumerate(calls)
+        ]
+    }
+    status, _headers, raw = _raw(
+        "POST",
+        GRAPH + "/$batch",
+        token,
+        data=json.dumps(payload).encode("utf-8"),
+        extra={"Content-Type": "application/json", "workbook-session-id": session},
+        follow=True,
+    )
+    if status != 200:
+        return False
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except json.JSONDecodeError:
+        return False
+    responses = parsed.get("responses") if isinstance(parsed, dict) else None
+    if not isinstance(responses, list) or len(responses) != len(calls):
+        return False
+    for item in responses:
+        code = item.get("status") or 0
+        if code < 400:
+            continue
+        detail = item.get("body")
+        encoded = json.dumps(detail).encode("utf-8") if not isinstance(detail, str) else detail.encode("utf-8")
+        raise OneDriveError(_http_message(code, encoded) or f"Excel could not change the workbook ({code}).")
+    return True
+
+
 def _download(token: str, item: dict) -> bytes:
     drive = (item.get("parentReference") or {}).get("driveId")
     item_id = item.get("id")
@@ -178,7 +377,7 @@ def _download(token: str, item: dict) -> bytes:
         if not location:
             raise OneDriveError("OneDrive did not return a download location")
         status, _headers, body = _raw("GET", location, token=None, follow=True)
-    if status != 200 or not body.startswith(b"PK"):
+    if status != 200 or not body:
         raise OneDriveError(_http_message(status, body) or f"download failed ({status})")
     return body
 
@@ -245,8 +444,19 @@ def _raw(method: str, url: str, token: str | None, data: bytes | None = None, ex
         raise OneDriveError(f"could not reach OneDrive: {exc.reason}") from exc
 
 
+def _readable_body(body: bytes) -> str:
+    if not body or body.startswith((b"PK", _OLE)):
+        return ""
+    text = body.decode("utf-8", errors="replace").strip()
+    if text.count("\ufffd") >= 3:
+        return ""
+    return text[:300]
+
+
 def _http_message(status: int, body: bytes) -> str:
-    text = body.decode("utf-8", errors="replace")[:400]
+    text = _readable_body(body)
+    if not text:
+        return ""
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
@@ -254,10 +464,17 @@ def _http_message(status: int, body: bytes) -> str:
     if isinstance(data, dict):
         error = data.get("error")
         if isinstance(error, dict) and error.get("message"):
-            return f"OneDrive ({status}): {error['message']}"
-    if text.strip():
-        return f"OneDrive ({status}): {text.strip()}"
-    return ""
+            message = str(error["message"])
+            nested = message
+            if message.startswith("{"):
+                try:
+                    inner = json.loads(message)
+                except json.JSONDecodeError:
+                    inner = None
+                if isinstance(inner, dict) and isinstance(inner.get("error"), dict):
+                    nested = inner["error"].get("message") or message
+            return f"OneDrive ({status}): {nested}"
+    return f"OneDrive ({status}): {text}"
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

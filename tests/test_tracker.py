@@ -13,10 +13,11 @@ from pathlib import Path
 
 from tracker.archive import Archive, ArchiveError, geomean
 from tracker.bench import parse_name
+from tracker.excel_push import describe, place_request
 from tracker.export_xlsx import append_workbook, workbook_bytes
 from tracker.fsview import list_dir
 from tracker.ingest import scan_path
-from tracker.onedrive import encode_share_url, file_name
+from tracker.onedrive import _http_message, encode_share_url, file_name
 from tracker.server import App, serve
 from tracker.workspace import Workspace
 
@@ -332,6 +333,39 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(name, "bta-1023-0700 2")
         self.assertEqual(final.sheetnames, ["Notes", "bta-1023-0700 2", "bta-1023-0700"])
         self.assertEqual(final["Notes"]["A1"].value, "keep")
+
+    def test_protected_workbook_is_described_without_its_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_bench(tmp, "base", 1024, 1024, 4)
+            write_bench(tmp, "base", 1024, 1024, 8)
+            write_bench(tmp, "cand", 1024, 1024, 4)
+            write_bench(tmp, "cand", 1024, 1024, 8)
+            blocks, _notices, model = scan_path(Path(tmp))
+            by = {block.label: block for block in blocks}
+            by["base"].baseline = True
+            by["base"].chart = True
+            by["cand"].baseline_id = by["base"].id
+            by["cand"].chart = True
+            archive = Archive(model=model, blocks=[by["base"], by["cand"]])
+        plan = describe(workbook_bytes(archive, sheet_title="bta-1023-0700"))
+        flat = [cell for chunk in plan["chunks"] for row in chunk["formulas"] for cell in row]
+        self.assertIn("=W7", flat)
+        self.assertTrue(any(isinstance(cell, str) and cell.startswith("=GEOMEAN(") for cell in flat))
+        self.assertTrue(any(item.split(":")[0].startswith("I") and item.split(":")[-1].startswith("K") for item in plan["merges"]))
+        self.assertTrue(any(item["body"]["color"] == "#92D050" for item in plan["fills"]))
+        self.assertLess(len(plan["borders"]), 80)
+        self.assertEqual(plan["base_font"]["body"]["name"], "Arial")
+        self.assertEqual(len(plan["charts"]), 1)
+        chart = plan["charts"][0]
+        island = [cell for row in chart["formulas"] for cell in row]
+        self.assertIn("base", island)
+        self.assertIn("cand", island)
+        self.assertIn("=NA()", island)
+        self.assertIn("ISL", chart["title"])
+        self.assertEqual(place_request("bta-1023-0700"), {"position": 1})
+        message = _http_message(200, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + bytes(range(256)) * 4)
+        self.assertEqual(message, "")
+        self.assertNotIn("\ufffd", message)
 
     def test_onedrive_link_names_the_file(self):
         url = (
