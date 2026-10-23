@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .venv/
+workspace.bta
+workspace.bta.tmp
+workspace.bta.bad

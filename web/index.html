@@ -9,10 +9,45 @@
 <body>
 <header>
   <h1>benchmark-tracker</h1>
+  <button type="button" id="new">New</button>
+  <button type="button" id="import">Import .bta</button>
+  <input id="import-file" type="file" accept=".bta,application/json" hidden>
+  <button type="button" id="save-bta">Export .bta</button>
+  <button type="button" id="save-xlsx">Export .xlsx</button>
+  <button type="button" id="save-onedrive" title="Add a new sheet to the shared OneDrive workbook">Add tab</button>
+  <label class="model">Model <input id="model" spellcheck="false" autocomplete="off"></label>
+  <button type="button" id="search-toggle">Search</button>
+  <div class="modes">
+    <button type="button" id="mode-blocks" class="on">Blocks</button>
+    <button type="button" id="mode-figures">Figures</button>
+  </div>
+  <span id="meta"></span>
 </header>
-<main>
-  <p id="status">Starting.</p>
-</main>
+<div id="searchbar" hidden>
+  <input id="search" placeholder="Label or attribute" spellcheck="false" autocomplete="off">
+  <span id="search-count"></span>
+</div>
+<div id="error" hidden></div>
+<div id="app">
+  <aside id="files"></aside>
+  <div id="stage">
+    <div id="board"></div>
+    <aside id="editor" hidden></aside>
+  </div>
+</div>
+<div id="modal" hidden>
+  <form id="collision-form">
+    <h2>These labels are already in the workspace</h2>
+    <p class="hint">Overwrite replaces the measurements and keeps the label, attributes, GPU divisor, baseline, figure choice, selected run, and which shapes are included. Rename adds another block.</p>
+    <div id="collision-list"></div>
+    <p id="collision-notes"></p>
+    <div class="actions">
+      <button type="button" id="collision-cancel">Cancel</button>
+      <button type="submit">Apply</button>
+    </div>
+  </form>
+</div>
+<div id="hover" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>

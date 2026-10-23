@@ -11,6 +11,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from tracker.server import App, serve  # noqa: E402
+from tracker.workspace import Workspace  # noqa: E402
 
 
 def main():
@@ -20,10 +21,10 @@ def main():
     ap.add_argument("--no-browser", action="store_true")
     args = ap.parse_args()
 
-    httpd = serve(App(), args.host, args.port)
+    httpd = serve(App(Workspace(HERE / "workspace.bta")), args.host, args.port)
     shown = "localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host
     url = f"http://{shown}:{args.port}/"
-    print(f"serving on {url}  (Ctrl+C to stop)")
+    print(f"serving on {url}  (Ctrl+C to stop)", flush=True)
     if not args.no_browser:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:
