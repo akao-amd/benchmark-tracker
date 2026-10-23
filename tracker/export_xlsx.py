@@ -133,6 +133,14 @@ def _sheet_title(title: str, taken: list[str]) -> str:
         number += 1
 
 
+def _place_second(book, sheet) -> None:
+    """The new tab sits immediately to the right of the leftmost tab."""
+    names = list(book.sheetnames)
+    if len(names) < 2 or sheet.title not in names:
+        return
+    book.move_sheet(sheet, offset=1 - names.index(sheet.title))
+
+
 def append_workbook(existing: bytes, archive: Archive, title: str) -> tuple[bytes, str]:
     """Add one benchmark sheet to an existing workbook. Other sheets stay."""
     try:
@@ -206,6 +214,7 @@ def workbook_bytes(archive: Archive, book=None, sheet_title: str = "Benchmark") 
         sheet.title = _sheet_title(sheet_title, [])
     else:
         sheet = book.create_sheet(_sheet_title(sheet_title, book.sheetnames))
+        _place_second(book, sheet)
     book.active = sheet
     by_id = {block.id: block for block in archive.blocks}
 

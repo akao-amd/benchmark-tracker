@@ -330,7 +330,7 @@ class ModelTest(unittest.TestCase):
         data, name = append_workbook(data, archive, "bta-1023-0700")
         final = load_workbook(io.BytesIO(data))
         self.assertEqual(name, "bta-1023-0700 2")
-        self.assertEqual(final.sheetnames, ["Notes", "bta-1023-0700", "bta-1023-0700 2"])
+        self.assertEqual(final.sheetnames, ["Notes", "bta-1023-0700 2", "bta-1023-0700"])
         self.assertEqual(final["Notes"]["A1"].value, "keep")
 
     def test_onedrive_link_names_the_file(self):
