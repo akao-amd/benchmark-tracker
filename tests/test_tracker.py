@@ -17,7 +17,7 @@ from tracker.excel_push import describe, place_request
 from tracker.export_xlsx import append_workbook, workbook_bytes
 from tracker.fsview import list_dir
 from tracker.ingest import scan_path
-from tracker.onedrive import _http_message, encode_share_url, file_name
+from tracker.onedrive import OneDriveError, _http_message, encode_share_url, file_name, remember_url
 from tracker.server import App, serve
 from tracker.workspace import Workspace
 
@@ -376,6 +376,14 @@ class ModelTest(unittest.TestCase):
         share = encode_share_url(url)
         self.assertTrue(share.startswith("u!"))
         self.assertNotIn("=", share)
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "onedrive.url"
+            kept = remember_url("  https://amdcloud-my.sharepoint.com/x/other.xlsx  ", dest)
+            self.assertEqual(dest.read_text(encoding="utf-8").strip(), kept)
+            self.assertTrue(kept.endswith("other.xlsx"))
+            with self.assertRaises(OneDriveError):
+                remember_url("not a link", dest)
+            self.assertTrue(dest.read_text(encoding="utf-8").strip().endswith("other.xlsx"))
 
     def test_real_directory_if_present(self):
         if not REAL.is_dir():

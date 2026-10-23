@@ -57,7 +57,18 @@ def file_name(url: str) -> str:
 
 def target_label() -> dict:
     url = target_url()
-    return {"file": file_name(url)}
+    return {"file": file_name(url), "url": url}
+
+
+def remember_url(url: str, path: Path | None = None) -> str:
+    """Keep the pasted workbook link. The next Add tab offers this one."""
+    text = url.strip()
+    parsed = urllib.parse.urlparse(text)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise OneDriveError("Paste an https link to the OneDrive workbook.")
+    dest = path or URL_FILE
+    dest.write_text(text + "\n", encoding="utf-8")
+    return text
 
 
 def encode_share_url(url: str) -> str:
@@ -66,10 +77,10 @@ def encode_share_url(url: str) -> str:
     return "u!" + token
 
 
-def publish(archive) -> dict:
+def publish(archive, url: str = "") -> dict:
     """Download the workbook, append one sheet, and upload it back."""
     with _LOCK:
-        url = target_url()
+        url = remember_url(url) if url.strip() else target_url()
         token = _access_token()
         item = _resolve(token, url)
         original = _download(token, item)

@@ -14,7 +14,7 @@
   <input id="import-file" type="file" accept=".bta,application/json" hidden>
   <button type="button" id="save-bta">Export .bta</button>
   <button type="button" id="save-xlsx">Export .xlsx</button>
-  <button type="button" id="save-onedrive" title="Add a new sheet to the shared OneDrive workbook">Add tab</button>
+  <button type="button" id="save-onedrive" title="Add a new sheet to a OneDrive workbook">Add tab</button>
   <label class="model">Model <input id="model" spellcheck="false" autocomplete="off"></label>
   <button type="button" id="search-toggle">Search</button>
   <div class="modes">
@@ -60,6 +60,16 @@
     <div class="actions">
       <button type="button" id="merge-cancel">Cancel</button>
       <button type="submit">Move</button>
+    </div>
+  </form>
+  <form id="onedrive-form" hidden>
+    <h2>Add a sheet</h2>
+    <label class="stack" for="onedrive-link">OneDrive link</label>
+    <textarea id="onedrive-link" rows="4" spellcheck="false" placeholder="https://"></textarea>
+    <p class="hint">Paste the workbook’s sharing link. The new tab is inserted second from the left. Other tabs stay.</p>
+    <div class="actions">
+      <button type="button" id="onedrive-cancel">Cancel</button>
+      <button type="submit" id="onedrive-add">Add tab</button>
     </div>
   </form>
 </div>

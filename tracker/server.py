@@ -117,10 +117,14 @@ class App:
         with self.workspace.lock:
             return workbook_bytes(self.workspace.archive)
 
-    def export_onedrive(self) -> dict:
+    def export_onedrive(self, body: dict | None = None) -> dict:
+        body = body or {}
+        url = body.get("url") or ""
+        if not isinstance(url, str):
+            raise ArchiveError("url must be a string")
         with self.workspace.lock:
             archive = copy.deepcopy(self.workspace.archive)
-        return publish(archive)
+        return publish(archive, url=url)
 
 
 def make_handler(app: App):
@@ -180,7 +184,7 @@ def make_handler(app: App):
             url = urlparse(self.path)
             if url.path == "/api/onedrive":
                 try:
-                    return self._json(app.export_onedrive())
+                    return self._json(app.export_onedrive(self._read()))
                 except OneDriveError as exc:
                     return self._json({"error": str(exc)}, 502)
                 except ExportError as exc:

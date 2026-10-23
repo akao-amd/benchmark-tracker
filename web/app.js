@@ -156,6 +156,7 @@ async function mergeBlocks(sourceId, targetId) {
   }
   state.pendingMerge = { sourceId, targetId };
   document.getElementById("collision-form").hidden = true;
+  document.getElementById("onedrive-form").hidden = true;
   document.getElementById("merge-form").hidden = false;
   document.getElementById("merge-title").textContent = "Move " + source.label + " into " + target.label;
   document.getElementById("merge-blurb").textContent = source.label + " is removed. Where the same shape, concurrency, and run exist in both blocks:";
@@ -210,6 +211,7 @@ function openCollision(collisions, notices) {
   const skipCount = notices.filter((notice) => notice.kind !== "note").length;
   notes.textContent = skipCount ? skipCount + " file" + (skipCount === 1 ? "" : "s") + " will be skipped." : "";
   document.getElementById("merge-form").hidden = true;
+  document.getElementById("onedrive-form").hidden = true;
   document.getElementById("collision-form").hidden = false;
   document.getElementById("modal").hidden = false;
 }
@@ -765,14 +767,36 @@ function wire() {
   });
   document.getElementById("save-bta").addEventListener("click", () => download("/api/export.bta"));
   document.getElementById("save-xlsx").addEventListener("click", () => download("/api/export.xlsx"));
-  document.getElementById("save-onedrive").addEventListener("click", async () => {
-    const file = (state.workspace.onedrive && state.workspace.onedrive.file) || "the OneDrive workbook";
-    if (!window.confirm("Add a new sheet to " + file + "? The other tabs stay.")) return;
-    const button = document.getElementById("save-onedrive");
+  document.getElementById("save-onedrive").addEventListener("click", () => {
+    document.getElementById("collision-form").hidden = true;
+    document.getElementById("merge-form").hidden = true;
+    document.getElementById("onedrive-form").hidden = false;
+    const box = document.getElementById("onedrive-link");
+    box.value = (state.workspace.onedrive && state.workspace.onedrive.url) || "";
+    document.getElementById("modal").hidden = false;
+    box.focus();
+  });
+  document.getElementById("onedrive-cancel").addEventListener("click", () => {
+    document.getElementById("modal").hidden = true;
+  });
+  document.getElementById("onedrive-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const url = document.getElementById("onedrive-link").value.trim();
+    const button = document.getElementById("onedrive-add");
+    if (!url) {
+      showError("Paste the OneDrive link.");
+      return;
+    }
     button.disabled = true;
     showError("");
     try {
-      const result = await readJson(await fetch("/api/onedrive", { method: "POST" }));
+      const result = await readJson(await fetch("/api/onedrive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      }));
+      state.workspace.onedrive = { file: result.file, url };
+      document.getElementById("modal").hidden = true;
       showStatus("Added " + result.sheet + " to " + result.file + ".");
     } catch (error) {
       showError(error);
