@@ -46,6 +46,22 @@
       <button type="submit">Apply</button>
     </div>
   </form>
+  <form id="merge-form" hidden>
+    <h2 id="merge-title">Move measurements</h2>
+    <p class="hint" id="merge-blurb"></p>
+    <div class="merge-options">
+      <label><input type="radio" name="merge-choice" value="overwrite"> Overwrite</label>
+      <label><input type="radio" name="merge-choice" value="keep" checked> Keep</label>
+      <label><input type="radio" name="merge-choice" value="worse"> Worse one</label>
+      <label><input type="radio" name="merge-choice" value="better"> Better one</label>
+      <label><input type="checkbox" id="merge-always"> Always this</label>
+    </div>
+    <p class="hint">Better is higher throughput per GPU. A tie uses lower median TTFT, then lower median TPOT. Always this lasts until you refresh.</p>
+    <div class="actions">
+      <button type="button" id="merge-cancel">Cancel</button>
+      <button type="submit">Move</button>
+    </div>
+  </form>
 </div>
 <div id="hover" hidden></div>
 <script src="app.js"></script>

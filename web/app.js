@@ -12,6 +12,8 @@ const state = {
   editorStamp: 0,
   copiedAttributes: null,
   copiedFrom: "",
+  mergeChoice: "",
+  pendingMerge: null,
 };
 
 function h(tag, props, kids) {
@@ -148,11 +150,28 @@ async function mergeBlocks(sourceId, targetId) {
   const source = blockById(sourceId);
   const target = blockById(targetId);
   if (!source || !target || sourceId === targetId) return;
-  if (!window.confirm("Move the measurements from " + source.label + " into " + target.label + "? " + source.label + " is removed if nothing is left.")) return;
+  if (state.mergeChoice) {
+    finishMerge(sourceId, targetId, state.mergeChoice);
+    return;
+  }
+  state.pendingMerge = { sourceId, targetId };
+  document.getElementById("collision-form").hidden = true;
+  document.getElementById("merge-form").hidden = false;
+  document.getElementById("merge-title").textContent = "Move " + source.label + " into " + target.label;
+  document.getElementById("merge-blurb").textContent = source.label + " is removed. Where the same shape, concurrency, and run exist in both blocks:";
+  document.querySelectorAll("input[name=merge-choice]").forEach((input) => { input.checked = input.value === "keep"; });
+  document.getElementById("merge-always").checked = false;
+  document.getElementById("modal").hidden = false;
+}
+
+async function finishMerge(sourceId, targetId, choice) {
+  const target = blockById(targetId);
   showError("");
+  document.getElementById("modal").hidden = true;
+  state.pendingMerge = null;
   try {
-    setWorkspace(await act({ action: "merge", id: sourceId, into: targetId }), true);
-    showStatus("Moved measurements into " + target.label + ".");
+    setWorkspace(await act({ action: "merge", id: sourceId, into: targetId, choice }), true);
+    showStatus("Moved measurements into " + (target ? target.label : "the block") + ".");
   } catch (error) {
     showError(error);
   }
@@ -190,6 +209,8 @@ function openCollision(collisions, notices) {
   const notes = document.getElementById("collision-notes");
   const skipCount = notices.filter((notice) => notice.kind !== "note").length;
   notes.textContent = skipCount ? skipCount + " file" + (skipCount === 1 ? "" : "s") + " will be skipped." : "";
+  document.getElementById("merge-form").hidden = true;
+  document.getElementById("collision-form").hidden = false;
   document.getElementById("modal").hidden = false;
 }
 
@@ -598,7 +619,10 @@ function renderEditor() {
     moveInto.addEventListener("click", () => mergeBlocks(block.id, select.value));
     aside.append(h("div", { class: "attr-actions" }, [moveInto, select]));
   }
-  aside.append(h("p", { class: "hint", text: "Drag a results folder onto this block to add those files here. Drag this block onto another block to move the measurements. A row that is already there stays put." }));
+  const mergeHint = state.mergeChoice
+    ? "Drag a block onto another block. Matching rows use " + state.mergeChoice + " until you refresh."
+    : "Drag a block onto another block and choose overwrite, keep, the worse row, or the better row.";
+  aside.append(h("p", { class: "hint", text: "Drag a results folder onto this block to add those files here. " + mergeHint }));
   const up = h("button", { type: "button", text: "Move up" });
   const down = h("button", { type: "button", text: "Move down" });
   const remove = h("button", { type: "button", text: "Remove block" });
@@ -778,6 +802,19 @@ function wire() {
   document.getElementById("collision-cancel").addEventListener("click", () => {
     document.getElementById("modal").hidden = true;
     state.pendingPath = "";
+  });
+  document.getElementById("merge-cancel").addEventListener("click", () => {
+    document.getElementById("modal").hidden = true;
+    state.pendingMerge = null;
+  });
+  document.getElementById("merge-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const pending = state.pendingMerge;
+    if (!pending) return;
+    const picked = document.querySelector("input[name=merge-choice]:checked");
+    const choice = picked ? picked.value : "keep";
+    state.mergeChoice = document.getElementById("merge-always").checked ? choice : "";
+    finishMerge(pending.sourceId, pending.targetId, choice);
   });
   document.getElementById("collision-form").addEventListener("submit", (event) => {
     event.preventDefault();

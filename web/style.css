@@ -75,7 +75,9 @@ td.miss { color: #8d1d1d; }
 #hover strong { display: block; margin-bottom: 4px; }
 #hover p { margin: 0; color: #333; }
 #modal { position: fixed; inset: 0; background: rgba(0,0,0,.28); display: flex; align-items: center; justify-content: center; z-index: 6; }
-#collision-form { width: min(560px, calc(100vw - 32px)); background: #fff; border-radius: 8px; padding: 16px; }
+#collision-form, #merge-form { width: min(560px, calc(100vw - 32px)); background: #fff; border-radius: 8px; padding: 16px; }
+.merge-options { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.merge-options label { display: flex; gap: 6px; align-items: center; }
 .choice { display: grid; grid-template-columns: 1fr; gap: 4px; padding: 8px 0; border-top: 1px solid #eee; }
 .choice .opts { display: flex; gap: 12px; align-items: center; }
 .choice input[type="text"] { flex: 1; border: 1px solid #c8c8c8; border-radius: 4px; padding: 4px 6px; }

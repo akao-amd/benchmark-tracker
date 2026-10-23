@@ -94,7 +94,7 @@ class App:
             elif action == "move":
                 archive.move(str(body.get("id") or ""), int(body.get("direction") or 0))
             elif action == "merge":
-                archive.merge(str(body.get("id") or ""), str(body.get("into") or ""))
+                archive.merge(str(body.get("id") or ""), str(body.get("into") or ""), str(body.get("choice") or ""))
             elif action == "delete_point":
                 archive.delete_point(
                     str(body.get("id") or ""),

@@ -300,6 +300,23 @@ class Block:
         return block
 
 
+def _rank(point: Point, gpus: float) -> tuple:
+    """Higher is a better row: throughput per GPU, then lower median TTFT, then lower median TPOT."""
+    return (point.per_gpu(gpus), -point.median_ttft_ms, -point.median_tpot_ms)
+
+
+def _prefer_incoming(choice: str, incoming: Point, incoming_gpus: float, current: Point, current_gpus: float) -> bool:
+    if choice == "overwrite":
+        return True
+    if choice == "keep":
+        return False
+    incoming_rank = _rank(incoming, incoming_gpus)
+    current_rank = _rank(current, current_gpus)
+    if choice == "better":
+        return incoming_rank > current_rank
+    return incoming_rank < current_rank
+
+
 @dataclass
 class Archive:
     model: str = ""
@@ -466,41 +483,46 @@ class Archive:
         if model_hint and not self.model:
             self.model = model_hint
 
-    def merge(self, source_id: str, target_id: str) -> None:
-        """Move measurements from one block into another. A matching row stays where it already is."""
+    def merge(self, source_id: str, target_id: str, choice: str) -> None:
+        """Move measurements into the target block. choice decides a row that exists in both."""
         if source_id == target_id:
             raise ArchiveError("choose a different block")
+        if choice not in ("overwrite", "keep", "worse", "better"):
+            raise ArchiveError("choose overwrite, keep, worse, or better")
         source = self.block(source_id)
         target = self.block(target_id)
-        held = {
-            (point.input_len, point.output_len, point.concurrency, point.run)
+        placed = {
+            (point.input_len, point.output_len, point.concurrency, point.run): point
             for point in target.points
         }
-        staying: list[Point] = []
+        taken = 0
+        left = 0
         for point in source.points:
             key = (point.input_len, point.output_len, point.concurrency, point.run)
-            if key in held:
-                self.add_notice(
-                    point.source,
-                    f"already in {target.label} {key[0]}/{key[1]} c{key[2]} r{key[3]}; left it on {source.label}",
-                    "note",
-                )
-                staying.append(point)
+            current = placed.get(key)
+            if current is None:
+                target.points.append(point)
+                placed[key] = point
                 continue
-            target.points.append(point)
-            held.add(key)
+            if _prefer_incoming(choice, point, source.gpus, current, target.gpus):
+                index = target.points.index(current)
+                target.points[index] = point
+                placed[key] = point
+                taken += 1
+            else:
+                left += 1
+        if taken or left:
+            self.add_notice(
+                target.label,
+                f"{target.label}: {taken} matching rows taken from {source.label}, {left} left as they were ({choice})",
+                "note",
+            )
         for key, value in source.attributes.items():
             if value and not target.attr(key):
                 target.attributes[key] = value
         runs = target.runs()
         if runs and target.active_run not in runs:
             target.active_run = runs[0]
-        if staying:
-            source.points = staying
-            source_runs = source.runs()
-            if source_runs and source.active_run not in source_runs:
-                source.active_run = source_runs[0]
-            return
         self.delete(source.id)
 
     def _replace_notices(self, notices: list[dict], blocks: list[Block]) -> None:

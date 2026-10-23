@@ -91,6 +91,33 @@ class ModelTest(unittest.TestCase):
             self.assertEqual(by["tp1"].gpus, 1)
             self.assertEqual(by["tp1"].attributes["framework"], "sglang")
 
+    def test_merge_choice_picks_the_row(self):
+        def merged(choice, source_row, target_row, source_gpus=1, target_gpus=1):
+            with tempfile.TemporaryDirectory() as tmp:
+                write_bench(tmp, "src", 1024, 1024, 4, **source_row)
+                write_bench(tmp, "src", 8192, 1024, 8)
+                write_bench(tmp, "dst", 1024, 1024, 4, **target_row)
+                blocks, _notices, _model = scan_path(Path(tmp))
+                by = {block.label: block for block in blocks}
+                by["src"].gpus = source_gpus
+                by["dst"].gpus = target_gpus
+                archive = Archive(blocks=[by["dst"], by["src"]])
+                archive.merge(by["src"].id, by["dst"].id, choice)
+                self.assertEqual([block.label for block in archive.blocks], ["dst"])
+                self.assertEqual(sum(point.input_len == 8192 for point in archive.blocks[0].points), 1)
+                matched = [point for point in archive.blocks[0].points if point.input_len == 1024]
+                self.assertEqual(len(matched), 1)
+                return matched[0].server_total
+
+        low = {"total_input_tokens": 100, "total_output_tokens": 100}
+        high = {"total_input_tokens": 400, "total_output_tokens": 100}
+        self.assertEqual(merged("keep", low, high), 500)
+        self.assertEqual(merged("overwrite", low, high), 200)
+        self.assertEqual(merged("better", low, high), 500)
+        self.assertEqual(merged("worse", low, high), 200)
+        self.assertEqual(merged("better", {"total_input_tokens": 300, "total_output_tokens": 100}, {"total_input_tokens": 200, "total_output_tokens": 100}, 2, 1), 300)
+        self.assertEqual(merged("worse", {"total_input_tokens": 300, "total_output_tokens": 100}, {"total_input_tokens": 200, "total_output_tokens": 100}, 2, 1), 400)
+
     def test_rescan_drops_a_stale_skip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = write_bench(tmp, "tp1", 1024, 1024, 4)
@@ -418,7 +445,7 @@ class ApiTest(unittest.TestCase):
         status, view = self.request("POST", "/api/act", {"action": "ingest", "path": str(solo)})
         self.assertEqual(status, 200, view)
         solo_id = next(item["id"] for item in view["blocks"] if item["label"] == "solo")
-        status, view = self.request("POST", "/api/act", {"action": "merge", "id": solo_id, "into": block_id})
+        status, view = self.request("POST", "/api/act", {"action": "merge", "id": solo_id, "into": block_id, "choice": "keep"})
         self.assertEqual(status, 200, view)
         self.assertEqual([item["label"] for item in view["blocks"]], ["tp1"])
         self.assertTrue(any(shape["input_len"] == 70000 for shape in view["blocks"][0]["shapes"]))
