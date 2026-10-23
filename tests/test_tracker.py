@@ -361,6 +361,9 @@ class ModelTest(unittest.TestCase):
         self.assertTrue(any(isinstance(cell, str) and cell.startswith("=GEOMEAN(") for cell in flat))
         self.assertTrue(any(item.split(":")[0].startswith("I") and item.split(":")[-1].startswith("K") for item in plan["merges"]))
         self.assertTrue(any(item["body"]["color"] == "#92D050" for item in plan["fills"]))
+        widths = {item["address"]: item["width"] for item in plan["widths"]}
+        self.assertAlmostEqual(widths["A:A"], round(3 * 54 / 8.43, 2))
+        self.assertGreater(widths["B:B"], 80)
         self.assertLess(len(plan["borders"]), 80)
         self.assertEqual(plan["base_font"]["body"]["name"], "Arial")
         self.assertEqual(len(plan["charts"]), 1)

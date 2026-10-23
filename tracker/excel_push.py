@@ -17,6 +17,10 @@ _CELL_REF = re.compile(r"\$([A-Z]{1,3})\$(\d+)")
 _LINE = ("4F81BD", "C0504D", "9BBB59", "8064A2", "4BACC6", "F79646")
 _CHUNK_ROWS = 30
 _BORDER = {"style": "Continuous", "color": "#D6D3D1", "weight": "Thin"}
+# openpyxl column width is in characters (8.43 is Excel's default). Graph's
+# columnWidth uses a point-like unit where that same default is 54.
+_CHAR_WIDTH = 8.43
+_POINT_WIDTH = 54.0
 
 
 def describe(xlsx_bytes: bytes) -> dict:
@@ -75,7 +79,7 @@ def describe(xlsx_bytes: bytes) -> dict:
         "borders": _border_calls(set(fonts), get_column_letter),
         "merges": [str(merged) for merged in sheet.merged_cells.ranges],
         "widths": [
-            {"address": f"{letter}:{letter}", "width": dim.width}
+            {"address": f"{letter}:{letter}", "width": _column_points(dim.width)}
             for letter, dim in sheet.column_dimensions.items()
             if dim.width
         ],
@@ -87,6 +91,10 @@ def describe(xlsx_bytes: bytes) -> dict:
     }
     charts, hide = _charts(sheet, get_column_letter, column_index_from_string)
     return {"chunks": chunks, **style_rows, "charts": charts, "hide": hide}
+
+
+def _column_points(width: float) -> float:
+    return round(float(width) * _POINT_WIDTH / _CHAR_WIDTH, 2)
 
 
 def place_request(_title: str) -> dict:

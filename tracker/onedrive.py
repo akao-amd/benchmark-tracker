@@ -282,13 +282,13 @@ def _write_plan(token: str, root: str, session_id: str, title: str, plan: dict) 
         calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format/borders/{item['edge']}", item["body"]))
     for address in plan["merges"]:
         calls.append(("POST", f"{relative}/range(address='{address}')/merge", {}))
-    for item in plan["widths"]:
-        calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format", {"columnWidth": item["width"]}))
     for item in plan["heights"]:
         calls.append(("PATCH", f"{relative}/range(address='{item['address']}')/format", {"rowHeight": item["height"]}))
     for chart in plan["charts"]:
         calls.append(("PATCH", f"{relative}/range(address='{chart['address']}')", {"formulas": chart["formulas"]}))
     _excel_many(token, session_id, calls)
+    for item in plan["widths"]:
+        _excel(token, "PATCH", f"{sheet}/range(address='{item['address']}')/format", {"columnWidth": item["width"]}, session=session_id)
     for column in plan["hide"]:
         try:
             _excel(token, "PATCH", f"{sheet}/range(address='{column}')/format", {"columnWidth": 0}, session=session_id)
