@@ -449,11 +449,38 @@ function showRefs(block) {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       closeMenu();
-      openDir(path);
+      copyPath(path);
     });
     menu.append(button);
   });
   placeMenu(menu, menu.offsetLeft, menu.offsetTop);
+}
+
+async function copyPath(path) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(path);
+        showStatus("Copied " + path);
+        return;
+      } catch (error) {
+        // A focused click is required for the clipboard API. The selection below covers the rest.
+      }
+    }
+    const area = document.createElement("textarea");
+    area.value = path;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.append(area);
+    area.select();
+    const copied = document.execCommand("copy");
+    area.remove();
+    if (!copied) throw new Error("Could not copy the path.");
+    showStatus("Copied " + path);
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function placeMenu(menu, x, y) {
