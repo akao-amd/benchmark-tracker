@@ -45,6 +45,8 @@ h2 { margin: 0 0 8px; font-size: 15px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
 .card { border: 1px solid #e4e4e4; border-top: 4px solid #92D050; border-radius: 6px; padding: 8px; background: #fff; cursor: pointer; min-height: 92px; }
 .card.on { border-color: #1c1c1c; }
+.card.retired { border-top-color: #c8c8c8; }
+.retired-head { margin: 18px 0 8px; color: #666; font-size: 12px; }
 .card.drop { outline: 2px dashed #1c1c1c; outline-offset: 2px; }
 .card header { font-weight: 650; padding: 0; border: 0; display: block; }
 .card p { margin: 4px 0 0; color: #444; }
@@ -74,6 +76,10 @@ td.miss { color: #8d1d1d; }
 #hover { position: fixed; z-index: 5; max-width: 320px; padding: 8px 10px; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.08); pointer-events: none; }
 #hover strong { display: block; margin-bottom: 4px; }
 #hover p { margin: 0; color: #333; }
+#menu { position: fixed; z-index: 7; min-width: 160px; max-width: 420px; padding: 4px; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+#menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 8px; }
+#menu button:hover { background: #f6f6f4; }
+#menu .hint { margin: 4px 8px; }
 #modal { position: fixed; inset: 0; background: rgba(0,0,0,.28); display: flex; align-items: center; justify-content: center; z-index: 6; }
 #collision-form, #merge-form, #onedrive-form { width: min(560px, calc(100vw - 32px)); background: #fff; border-radius: 8px; padding: 16px; }
 .stack { display: block; margin: 8px 0 4px; }

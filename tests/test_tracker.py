@@ -15,7 +15,7 @@ from tracker.archive import Archive, ArchiveError, geomean
 from tracker.bench import parse_name
 from tracker.excel_push import describe, place_request
 from tracker.export_xlsx import append_workbook, workbook_bytes
-from tracker.fsview import list_dir
+from tracker.fsview import list_dir, normalize
 from tracker.ingest import scan_path
 from tracker.onedrive import (
     OneDriveError,
@@ -218,6 +218,66 @@ class ModelTest(unittest.TestCase):
             incoming, more, hint = scan_path(Path(tmp))
             fresh.apply_scan(incoming, more, {"tp1": {"action": "rename", "label": "tp1 (2)"}}, hint)
             self.assertEqual([block.label for block in fresh.blocks], ["tp1", "tp1 (2)"])
+
+    def test_refs_stay_at_the_directory_and_retire_frees_the_label(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "first"
+            nested = first / "sweep"
+            nested.mkdir(parents=True)
+            write_bench(nested, "tp1", 1024, 1024, 4)
+            second = root / "second"
+            second.mkdir()
+            write_bench(second, "other", 1024, 1024, 8)
+            blocks, notices, model = scan_path(first)
+            archive = Archive(blocks=blocks, notices=notices, model=model)
+            self.assertEqual(archive.blocks[0].refs, [str(normalize(first))])
+            self.assertNotIn(".json", archive.blocks[0].refs[0])
+            more, extra_notices, _hint = scan_path(second)
+            archive.adopt(archive.blocks[0].id, more, extra_notices, "")
+            self.assertEqual(archive.blocks[0].refs, [str(normalize(first)), str(normalize(second))])
+            third = root / "third"
+            third.mkdir()
+            write_bench(third, "later", 8192, 1024, 4)
+            later, later_notices, _hint = scan_path(third)
+            archive.blocks.append(later[0])
+            archive.merge(later[0].id, archive.blocks[0].id, "keep")
+            self.assertEqual(archive.blocks[0].refs, [str(normalize(first)), str(normalize(second)), str(normalize(third))])
+            old = {
+                "id": "old",
+                "label": "tp1",
+                "ingested_from": str(first),
+                "points": [archive.blocks[0].points[0].to_dict()],
+            }
+            old["points"][0]["source"] = str(nested / "tp1_isl1024_osl1024_c4_r1.json")
+            lifted = Archive.load(json.dumps({"format": "bta", "version": 1, "blocks": [old]}))
+            self.assertEqual(lifted.blocks[0].refs, [str(first)])
+            archive.patch(archive.blocks[0].id, {"retired": True, "baseline": True, "chart": True})
+            self.assertTrue(archive.blocks[0].retired)
+            self.assertFalse(archive.blocks[0].baseline)
+            self.assertTrue(archive.blocks[0].retired_at)
+            again, again_notices, hint = scan_path(first)
+            archive.apply_scan(again, again_notices, None, hint)
+            self.assertEqual([block.label for block in archive.blocks], ["tp1", "tp1"])
+            self.assertTrue(archive.blocks[0].retired)
+            self.assertFalse(archive.blocks[1].retired)
+            with self.assertRaises(ArchiveError):
+                archive.patch(archive.blocks[0].id, {"retired": False})
+            archive.blocks[1].chart = True
+            self.assertEqual(archive.present()["figures"][0]["series"][0]["label"], "tp1")
+            self.assertEqual(len(archive.present()["figures"][0]["series"]), 1)
+            data = workbook_bytes(archive)
+            from openpyxl import load_workbook
+            sheet = load_workbook(io.BytesIO(data)).active
+            labels = [sheet.cell(row, 2).value for row in range(1, sheet.max_row + 1)]
+            self.assertEqual(labels.count("tp1"), 1)
+            stored = json.loads(archive.dumps())
+            self.assertEqual(
+                stored["blocks"][0]["refs"],
+                [str(normalize(first)), str(normalize(second)), str(normalize(third))],
+            )
+            reloaded = Archive.load(archive.dumps())
+            self.assertEqual([block.retired for block in reloaded.blocks], [True, False])
 
     def test_sheet_formulas_and_chart(self):
         with tempfile.TemporaryDirectory() as tmp:

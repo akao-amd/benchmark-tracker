@@ -76,6 +76,7 @@ def scan_path(path: Path) -> tuple[list[Block], list[dict], str]:
                 id=uuid.uuid4().hex[:12],
                 label=label,
                 ingested_from=str(root),
+                refs=[str(root)],
                 active_run=record["run"],
             )
             grouped[label] = block

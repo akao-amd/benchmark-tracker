@@ -219,16 +219,18 @@ def workbook_bytes(archive: Archive, book=None, sheet_title: str = "Benchmark") 
     by_id = {block.id: block for block in archive.blocks}
 
     def baseline_of(block: Block) -> Block | None:
-        if block.baseline or not block.baseline_id:
+        if block.retired or block.baseline or not block.baseline_id:
             return None
         target = by_id.get(block.baseline_id)
-        if target is None or not target.baseline:
+        if target is None or not target.baseline or target.retired:
             return None
         return target
 
     layouts = []
     cursor = 2
     for block in archive.blocks:
+        if block.retired:
+            continue
         base = baseline_of(block)
         layout = _plan(block, cursor, base is not None and bool(base.included_points()))
         if layout is None:

@@ -329,15 +329,29 @@ function renderBoard() {
     renderFigures(board, shown);
     return;
   }
-  if (!shown.length) {
+  const current = shown.filter((block) => !block.retired);
+  const retired = shown.filter((block) => block.retired);
+  if (!current.length && !retired.length) {
     board.append(h("p", { class: "empty", text: query
       ? "Nothing matches."
       : "Drag a results directory here. Drop it on a block to add the files to that block. The name in the file is not the block." }));
     return;
   }
-  const cards = h("div", { class: "cards" });
-  shown.forEach((block) => cards.append(card(block)));
-  board.append(cards);
+  if (!current.length) {
+    board.append(h("p", { class: "empty", text: query
+      ? "Nothing current matches."
+      : "Drag a results directory here. A retired block keeps its label free for the next set." }));
+  } else {
+    const cards = h("div", { class: "cards" });
+    current.forEach((block) => cards.append(card(block)));
+    board.append(cards);
+  }
+  if (retired.length) {
+    board.append(h("p", { class: "retired-head", text: "Retired" }));
+    const cards = h("div", { class: "cards" });
+    retired.forEach((block) => cards.append(card(block)));
+    board.append(cards);
+  }
 }
 
 function card(block) {
@@ -350,7 +364,11 @@ function card(block) {
   if (block.baseline_label) badges.push("vs " + block.baseline_label);
   if (block.chart) badges.push("on figure");
   if ((block.runs || []).length > 1) badges.push("run " + block.active_run);
-  const node = h("article", { class: "card" + (state.selected === block.id ? " on" : ""), "data-id": block.id });
+  if (block.retired) badges.push("retired");
+  const node = h("article", {
+    class: "card" + (block.retired ? " retired" : "") + (state.selected === block.id ? " on" : ""),
+    "data-id": block.id,
+  });
   node.append(h("header", { text: block.label }));
   node.append(h("p", { text: bits.join(" · ") }));
   node.append(h("p", { class: "badges", text: badges.join(" · ") }));
@@ -385,10 +403,78 @@ function card(block) {
   node.addEventListener("click", () => {
     state.selected = block.id;
     hideHover();
+    closeMenu();
     renderBoard();
     renderEditor();
   });
+  node.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    hideHover();
+    openMenu(block, event.clientX, event.clientY);
+  });
   return node;
+}
+
+function closeMenu() {
+  const menu = document.getElementById("menu");
+  menu.hidden = true;
+  menu.replaceChildren();
+}
+
+function openMenu(block, x, y) {
+  const menu = document.getElementById("menu");
+  menu.replaceChildren();
+  const ref = h("button", { type: "button", text: "Ref" });
+  ref.addEventListener("click", (event) => {
+    event.stopPropagation();
+    showRefs(block);
+  });
+  const retire = h("button", { type: "button", text: block.retired ? "Restore" : "Retire" });
+  retire.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeMenu();
+    retireBlock(block);
+  });
+  menu.append(ref, retire);
+  placeMenu(menu, x, y);
+}
+
+function showRefs(block) {
+  const menu = document.getElementById("menu");
+  const refs = block.refs || [];
+  menu.replaceChildren(h("p", { class: "hint", text: refs.length ? "Directories" : "No directory was recorded." }));
+  refs.forEach((path) => {
+    const button = h("button", { type: "button", text: path, title: path });
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeMenu();
+      openDir(path);
+    });
+    menu.append(button);
+  });
+  placeMenu(menu, menu.offsetLeft, menu.offsetTop);
+}
+
+function placeMenu(menu, x, y) {
+  menu.hidden = false;
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  menu.style.left = Math.max(8, Math.min(x, window.innerWidth - width - 8)) + "px";
+  menu.style.top = Math.max(8, Math.min(y, window.innerHeight - height - 8)) + "px";
+}
+
+async function retireBlock(block) {
+  const retiring = !block.retired;
+  if (retiring && !window.confirm("Retire " + block.label + "? It stays in the file, off the sheet, and this label can be imported again.")) return;
+  try {
+    setWorkspace(await act({ action: "patch", id: block.id, retired: retiring }), true);
+    showStatus(retiring ? "Retired " + block.label + "." : "Restored " + block.label + ".");
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function showHover(block, event) {
@@ -412,7 +498,7 @@ function hideHover() {
 }
 
 function renderFigures(board, blocks) {
-  const wanted = new Set(blocks.map((block) => block.label));
+  const wanted = new Set(blocks.filter((block) => !block.retired).map((block) => block.label));
   const figures = (state.workspace.figures || []).map((figure) => ({
     ...figure,
     series: figure.series.filter((series) => wanted.has(series.label)),
@@ -555,7 +641,7 @@ function renderEditor() {
   if (!block.baseline) {
     const select = h("select");
     select.append(h("option", { value: "", text: "No baseline" }));
-    (state.workspace.blocks || []).filter((item) => item.baseline && item.id !== block.id).forEach((item) => {
+    (state.workspace.blocks || []).filter((item) => item.baseline && !item.retired && item.id !== block.id).forEach((item) => {
       select.append(h("option", { value: item.id, text: item.label, selected: item.id === block.baseline_id ? "selected" : null }));
     });
     select.addEventListener("change", () => patch({ baseline_id: select.value || null }, true));
@@ -611,7 +697,10 @@ function renderEditor() {
     aside.append(shapes);
   }
   aside.append(measurementTable(block));
-  if (block.ingested_from) aside.append(h("p", { class: "from", text: block.ingested_from }));
+  if (block.retired) {
+    aside.append(h("p", { class: "hint", text: "Retired" + (block.retired_at ? " " + block.retired_at : "") + ". Right-click the card to restore it. A current block can use this label." }));
+  }
+  (block.refs || []).forEach((path) => aside.append(h("p", { class: "from", text: path })));
   if (block.missing) aside.append(h("p", { class: "miss", text: "A missing file keeps its numbers. The link is marked, and nothing else fails." }));
   const others = (state.workspace.blocks || []).filter((item) => item.id !== block.id);
   if (others.length) {
@@ -854,12 +943,13 @@ function wire() {
     ingest(state.pendingPath, resolutions);
   });
   document.addEventListener("keydown", (event) => {
-    const typing = event.target && (event.target.closest("input, textarea, select"));
+    const typing = event.target && event.target.closest && event.target.closest("input, textarea, select");
     if (event.key === "/" && !typing) {
       event.preventDefault();
       toggleSearch(true);
     } else if (event.key === "Escape") {
-      if (state.searchOpen) toggleSearch(false);
+      if (!document.getElementById("menu").hidden) closeMenu();
+      else if (state.searchOpen) toggleSearch(false);
       else if (state.selected) {
         state.selected = null;
         renderBoard();
@@ -868,6 +958,10 @@ function wire() {
     }
   });
   window.addEventListener("resize", hideHover);
+  document.addEventListener("pointerdown", (event) => {
+    const menu = document.getElementById("menu");
+    if (!menu.hidden && !menu.contains(event.target)) closeMenu();
+  });
 }
 
 function toggleSearch(open) {

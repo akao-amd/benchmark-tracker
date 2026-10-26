@@ -11,6 +11,7 @@ import json
 import math
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 FORMAT = "bta"
@@ -98,6 +99,52 @@ def suggest_label(label: str, taken: set[str]) -> str:
     while f"{label} ({number})" in taken:
         number += 1
     return f"{label} ({number})"
+
+
+def _ref_key(path: str) -> str:
+    return path.replace("\\", "/").rstrip("/").lower()
+
+
+def lift_refs(paths: list[str]) -> list[str]:
+    """Directory paths, ancestors only. A folder inside another recorded folder is omitted."""
+    cleaned = []
+    seen = set()
+    for raw in paths:
+        text = str(raw or "").strip().rstrip("/\\")
+        key = _ref_key(text)
+        if not key or key in seen or key == ".":
+            continue
+        seen.add(key)
+        cleaned.append(text)
+    kept = []
+    for path in cleaned:
+        key = _ref_key(path)
+        if any(key != other and key.startswith(other + "/") for other in (_ref_key(item) for item in cleaned)):
+            continue
+        kept.append(path)
+    return kept
+
+
+def _refs_from(raw: dict, points: list, ingested_from: str) -> list[str]:
+    """Directories this block was built from. Older files record only the last one."""
+    if "refs" in raw and raw.get("refs") is not None:
+        listed = raw.get("refs")
+        if not isinstance(listed, list):
+            raise ArchiveError("refs must be a list of directories")
+        return lift_refs([_text(item, "ref") for item in listed])
+    seeds = [ingested_from] if ingested_from else []
+    for point in points:
+        source = getattr(point, "source", "")
+        if not source:
+            continue
+        parent = str(Path(source).parent)
+        if parent and parent != ".":
+            seeds.append(parent)
+    return lift_refs(seeds)
+
+
+def _add_refs(block, paths: list[str]) -> None:
+    block.refs = lift_refs(list(block.refs) + list(paths))
 
 
 @dataclass
@@ -203,6 +250,9 @@ class Block:
     attributes: dict[str, str] = field(default_factory=dict)
     excluded_shapes: list[tuple[int, int]] = field(default_factory=list)
     ingested_from: str = ""
+    refs: list[str] = field(default_factory=list)
+    retired: bool = False
+    retired_at: str = ""
 
     def __post_init__(self):
         self.ensure_attributes()
@@ -239,6 +289,9 @@ class Block:
             "attributes": dict(self.attributes),
             "excluded_shapes": [[isl, osl] for isl, osl in self.excluded_shapes],
             "ingested_from": self.ingested_from,
+            "refs": list(self.refs),
+            "retired": self.retired,
+            "retired_at": self.retired_at,
             "points": [point.to_dict() for point in self.points],
         }
 
@@ -294,6 +347,9 @@ class Block:
             attributes=clean_attributes,
             excluded_shapes=shapes,
             ingested_from=_text(raw.get("ingested_from", ""), f"{where} ingested_from"),
+            refs=_refs_from(raw, points, _text(raw.get("ingested_from", ""), f"{where} ingested_from")),
+            retired=bool(raw.get("retired")),
+            retired_at=_text(raw.get("retired_at", ""), f"{where} retired_at"),
         )
         if not block.id:
             raise ArchiveError(f"{where}: id is empty")
@@ -348,12 +404,14 @@ class Archive:
         ids = [block.id for block in blocks]
         if len(ids) != len(set(ids)):
             raise ArchiveError("two blocks share an id")
-        labels = [block.label for block in blocks]
-        if len(labels) != len(set(labels)):
+        active_labels = [block.label for block in blocks if not block.retired]
+        if len(active_labels) != len(set(active_labels)):
             raise ArchiveError("two blocks share a label")
-        known = set(ids)
+        known = {block.id: block for block in blocks}
         for block in blocks:
             if block.baseline_id and block.baseline_id not in known:
+                block.baseline_id = None
+            elif block.baseline_id and known[block.baseline_id].retired:
                 block.baseline_id = None
             if block.baseline_id == block.id:
                 block.baseline_id = None
@@ -378,7 +436,7 @@ class Archive:
 
     def apply_scan(self, blocks: list[Block], notices: list[dict], resolutions: dict | None, model_hint: str) -> None:
         """Add scanned blocks, or raise Conflict before changing anything."""
-        existing = {block.label: block for block in self.blocks}
+        existing = {block.label: block for block in self.blocks if not block.retired}
         taken = set(existing)
         incoming = {block.label: block for block in blocks}
         if len(incoming) != len(blocks):
@@ -437,6 +495,7 @@ class Archive:
                 old = existing[label]
                 old.points = block.points
                 old.ingested_from = block.ingested_from
+                old.refs = list(block.refs)
                 runs = old.runs()
                 if runs and old.active_run not in runs:
                     old.active_run = runs[0]
@@ -462,6 +521,7 @@ class Archive:
             for key, value in block.attributes.items():
                 if value and not target.attr(key):
                     target.attributes[key] = value
+            _add_refs(target, block.refs or ([block.ingested_from] if block.ingested_from else []))
             for point in block.points:
                 key = (point.input_len, point.output_len, point.concurrency, point.run)
                 if key in held:
@@ -520,6 +580,7 @@ class Archive:
         for key, value in source.attributes.items():
             if value and not target.attr(key):
                 target.attributes[key] = value
+        _add_refs(target, source.refs or ([source.ingested_from] if source.ingested_from else []))
         runs = target.runs()
         if runs and target.active_run not in runs:
             target.active_run = runs[0]
@@ -540,7 +601,7 @@ class Archive:
             label = _text(fields["label"], "label").strip()
             if not label:
                 raise ArchiveError("label is empty")
-            if any(other.label == label and other.id != block.id for other in self.blocks):
+            if any(other.label == label and other.id != block.id and not other.retired and not block.retired for other in self.blocks):
                 raise ArchiveError(f"{label} is already used")
             block.label = label
         if "gpus" in fields:
@@ -593,9 +654,30 @@ class Archive:
                 if baseline_id == block.id:
                     raise ArchiveError("a block cannot be its own baseline")
                 target = self.block(baseline_id)
+                if target.retired:
+                    raise ArchiveError(f"{target.label} is retired")
                 if not target.baseline:
                     raise ArchiveError(f"mark {target.label} as a baseline first")
                 block.baseline_id = baseline_id
+        if "retired" in fields:
+            turning_on = bool(fields["retired"]) and not block.retired
+            turning_off = not bool(fields["retired"]) and block.retired
+            if turning_off and any(
+                other.label == block.label and other.id != block.id and not other.retired
+                for other in self.blocks
+            ):
+                raise ArchiveError(f"{block.label} is already in use. Retire that block first.")
+            block.retired = bool(fields["retired"])
+            if turning_on:
+                block.retired_at = datetime.now().astimezone().isoformat(timespec="minutes")
+                block.baseline = False
+                block.baseline_id = None
+                for other in self.blocks:
+                    if other.baseline_id == block.id:
+                        other.baseline_id = None
+                        self.add_notice(other.label, f"{other.label} no longer has a baseline")
+            elif turning_off:
+                block.retired_at = ""
         if block.baseline:
             block.baseline_id = None
 
@@ -647,7 +729,7 @@ class Archive:
         if block.baseline or not block.baseline_id:
             return None
         target = by_id.get(block.baseline_id)
-        if target is None or not target.baseline:
+        if target is None or not target.baseline or target.retired:
             return None
         return target
 
@@ -734,10 +816,13 @@ class Archive:
             "missing": missing,
             "points": len(block.points),
             "ingested_from": block.ingested_from,
+            "refs": list(block.refs),
+            "retired": block.retired,
+            "retired_at": block.retired_at,
         }
 
     def _figures(self, by_id: dict[str, Block]) -> list[dict]:
-        charted = [block for block in self.blocks if block.chart]
+        charted = [block for block in self.blocks if block.chart and not block.retired]
         shape_order: list[tuple[int, int]] = []
         seen = set()
         for block in charted:
