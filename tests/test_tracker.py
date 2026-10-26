@@ -231,6 +231,8 @@ class ModelTest(unittest.TestCase):
             write_bench(second, "other", 1024, 1024, 8)
             blocks, notices, model = scan_path(first)
             archive = Archive(blocks=blocks, notices=notices, model=model)
+            added = archive.blocks[0].added_at
+            self.assertRegex(added, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}")
             self.assertEqual(archive.blocks[0].refs, [str(normalize(first))])
             self.assertNotIn(".json", archive.blocks[0].refs[0])
             more, extra_notices, _hint = scan_path(second)
@@ -252,6 +254,7 @@ class ModelTest(unittest.TestCase):
             old["points"][0]["source"] = str(nested / "tp1_isl1024_osl1024_c4_r1.json")
             lifted = Archive.load(json.dumps({"format": "bta", "version": 1, "blocks": [old]}))
             self.assertEqual(lifted.blocks[0].refs, [str(first)])
+            self.assertEqual(lifted.blocks[0].added_at, "")
             archive.patch(archive.blocks[0].id, {"retired": True, "baseline": True, "chart": True})
             self.assertTrue(archive.blocks[0].retired)
             self.assertFalse(archive.blocks[0].baseline)
@@ -259,6 +262,9 @@ class ModelTest(unittest.TestCase):
             again, again_notices, hint = scan_path(first)
             archive.apply_scan(again, again_notices, None, hint)
             self.assertEqual([block.label for block in archive.blocks], ["tp1", "tp1"])
+            self.assertEqual(archive.blocks[0].added_at, added)
+            self.assertTrue(archive.blocks[1].added_at)
+            self.assertNotEqual(archive.blocks[0].id, archive.blocks[1].id)
             self.assertTrue(archive.blocks[0].retired)
             self.assertFalse(archive.blocks[1].retired)
             with self.assertRaises(ArchiveError):
@@ -278,6 +284,8 @@ class ModelTest(unittest.TestCase):
             )
             reloaded = Archive.load(archive.dumps())
             self.assertEqual([block.retired for block in reloaded.blocks], [True, False])
+            self.assertEqual(reloaded.blocks[0].added_at, added)
+            self.assertEqual([item["added_at"] for item in reloaded.present()["blocks"]], [added, archive.blocks[1].added_at])
 
     def test_sheet_formulas_and_chart(self):
         with tempfile.TemporaryDirectory() as tmp:

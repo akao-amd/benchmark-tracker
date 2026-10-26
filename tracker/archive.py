@@ -94,6 +94,11 @@ def geomean(values: list[float]) -> float | None:
     return math.prod(nums) ** (1 / len(nums))
 
 
+def stamp() -> str:
+    """Local time to the minute, so a reused label still has an order."""
+    return datetime.now().astimezone().isoformat(timespec="minutes")
+
+
 def suggest_label(label: str, taken: set[str]) -> str:
     number = 2
     while f"{label} ({number})" in taken:
@@ -253,6 +258,7 @@ class Block:
     refs: list[str] = field(default_factory=list)
     retired: bool = False
     retired_at: str = ""
+    added_at: str = ""
 
     def __post_init__(self):
         self.ensure_attributes()
@@ -292,6 +298,7 @@ class Block:
             "refs": list(self.refs),
             "retired": self.retired,
             "retired_at": self.retired_at,
+            "added_at": self.added_at,
             "points": [point.to_dict() for point in self.points],
         }
 
@@ -350,6 +357,7 @@ class Block:
             refs=_refs_from(raw, points, _text(raw.get("ingested_from", ""), f"{where} ingested_from")),
             retired=bool(raw.get("retired")),
             retired_at=_text(raw.get("retired_at", ""), f"{where} retired_at"),
+            added_at=_text(raw.get("added_at", ""), f"{where} added_at"),
         )
         if not block.id:
             raise ArchiveError(f"{where}: id is empty")
@@ -669,7 +677,7 @@ class Archive:
                 raise ArchiveError(f"{block.label} is already in use. Retire that block first.")
             block.retired = bool(fields["retired"])
             if turning_on:
-                block.retired_at = datetime.now().astimezone().isoformat(timespec="minutes")
+                block.retired_at = stamp()
                 block.baseline = False
                 block.baseline_id = None
                 for other in self.blocks:
@@ -819,6 +827,7 @@ class Archive:
             "refs": list(block.refs),
             "retired": block.retired,
             "retired_at": block.retired_at,
+            "added_at": block.added_at,
         }
 
     def _figures(self, by_id: dict[str, Block]) -> list[dict]:

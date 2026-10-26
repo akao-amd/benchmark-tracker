@@ -6,7 +6,7 @@ import os
 import uuid
 from pathlib import Path
 
-from .archive import ArchiveError, Block, Point
+from .archive import ArchiveError, Block, Point, stamp
 from .bench import BenchError, load_record, looks_like_bench_name, parse_name
 from .fsview import normalize
 
@@ -78,6 +78,7 @@ def scan_path(path: Path) -> tuple[list[Block], list[dict], str]:
                 ingested_from=str(root),
                 refs=[str(root)],
                 active_run=record["run"],
+                added_at=stamp(),
             )
             grouped[label] = block
             order.append(label)

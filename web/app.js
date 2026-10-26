@@ -349,9 +349,24 @@ function renderBoard() {
   if (retired.length) {
     board.append(h("p", { class: "retired-head", text: "Retired" }));
     const cards = h("div", { class: "cards" });
-    retired.forEach((block) => cards.append(card(block)));
+    retired.slice().sort(newestFirst).forEach((block) => cards.append(card(block)));
     board.append(cards);
   }
+}
+
+function clock(stamp) {
+  return stamp ? stamp.slice(0, 16).replace("T", " ") : "";
+}
+
+function newestFirst(a, b) {
+  return (b.added_at || b.retired_at || "").localeCompare(a.added_at || a.retired_at || "") || a.label.localeCompare(b.label);
+}
+
+function timeLine(block) {
+  const parts = [];
+  if (block.added_at) parts.push("added " + clock(block.added_at));
+  if (block.retired && block.retired_at) parts.push("retired " + clock(block.retired_at));
+  return parts.join(" · ");
 }
 
 function card(block) {
@@ -370,6 +385,8 @@ function card(block) {
     "data-id": block.id,
   });
   node.append(h("header", { text: block.label }));
+  const when = timeLine(block);
+  if (when) node.append(h("p", { class: "when", text: when }));
   node.append(h("p", { text: bits.join(" · ") }));
   node.append(h("p", { class: "badges", text: badges.join(" · ") }));
   if (block.missing) node.append(h("p", { class: "miss", text: block.missing + " source file" + (block.missing === 1 ? "" : "s") + " missing" }));
@@ -637,6 +654,7 @@ function renderEditor() {
   aside.append(field("Label", h("input", { id: "f-label", value: block.label, spellcheck: "false" }), (input) => {
     input.addEventListener("change", () => patch({ label: input.value }, false));
   }));
+  historyOf(block, aside);
   const gpus = h("input", { id: "f-gpus", type: "number", min: "0", step: "any", value: block.gpus });
   aside.append(field("GPUs, the divisor", gpus, (input) => {
     input.addEventListener("change", () => patch({ gpus: Number(input.value) }, true));
@@ -725,7 +743,7 @@ function renderEditor() {
   }
   aside.append(measurementTable(block));
   if (block.retired) {
-    aside.append(h("p", { class: "hint", text: "Retired" + (block.retired_at ? " " + block.retired_at : "") + ". Right-click the card to restore it. A current block can use this label." }));
+    aside.append(h("p", { class: "hint", text: "Retired" + (block.retired_at ? " " + clock(block.retired_at) : "") + ". Right-click the card to restore it. A current block can use this label." }));
   }
   (block.refs || []).forEach((path) => aside.append(h("p", { class: "from", text: path })));
   if (block.missing) aside.append(h("p", { class: "miss", text: "A missing file keeps its numbers. The link is marked, and nothing else fails." }));
@@ -755,6 +773,27 @@ function renderEditor() {
   });
   aside.append(h("div", { class: "actions" }, [up, down, remove]));
   if (stamp !== state.editorStamp) return;
+}
+
+function historyOf(block, aside) {
+  const kin = (state.workspace.blocks || []).filter((item) => item.label === block.label);
+  if (kin.length < 2) return;
+  aside.append(h("h2", { text: "History" }));
+  const list = h("div", { class: "history" });
+  kin.slice().sort(newestFirst).forEach((item) => {
+    const added = clock(item.added_at);
+    const line = item.retired
+      ? (added ? added + " · " : "") + "retired" + (item.retired_at ? " " + clock(item.retired_at) : "")
+      : (added || "current") + " · current";
+    const button = h("button", { type: "button", class: item.id === block.id ? "on" : "", text: line });
+    button.addEventListener("click", () => {
+      state.selected = item.id;
+      renderBoard();
+      renderEditor();
+    });
+    list.append(button);
+  });
+  aside.append(list);
 }
 
 function field(label, input, bind) {
