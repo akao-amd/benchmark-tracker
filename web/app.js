@@ -14,6 +14,8 @@ const state = {
   copiedFrom: "",
   mergeChoice: "",
   pendingMerge: null,
+  filesFolded: false,
+  boardFolded: false,
 };
 
 function h(tag, props, kids) {
@@ -214,6 +216,21 @@ function openCollision(collisions, notices) {
   document.getElementById("onedrive-form").hidden = true;
   document.getElementById("collision-form").hidden = false;
   document.getElementById("modal").hidden = false;
+}
+
+function applyFolds() {
+  document.getElementById("files-pane").classList.toggle("folded", state.filesFolded);
+  document.getElementById("board-pane").classList.toggle("folded", state.boardFolded);
+  document.getElementById("app").classList.toggle("board-folded", state.boardFolded);
+  const files = document.getElementById("fold-files");
+  const board = document.getElementById("fold-board");
+  const boardName = state.mode === "figures" ? "Figures" : "Blocks";
+  files.textContent = state.filesFolded ? "Files" : "‹";
+  board.textContent = state.boardFolded ? boardName : "‹";
+  files.title = state.filesFolded ? "Show files" : "Fold files";
+  board.title = state.boardFolded ? "Show " + boardName.toLowerCase() : "Fold " + boardName.toLowerCase();
+  files.setAttribute("aria-expanded", state.filesFolded ? "false" : "true");
+  board.setAttribute("aria-expanded", state.boardFolded ? "false" : "true");
 }
 
 function renderMeta() {
@@ -969,6 +986,15 @@ function wire() {
   });
   document.getElementById("mode-blocks").addEventListener("click", () => setMode("blocks"));
   document.getElementById("mode-figures").addEventListener("click", () => setMode("figures"));
+  document.getElementById("fold-files").addEventListener("click", () => {
+    state.filesFolded = !state.filesFolded;
+    applyFolds();
+  });
+  document.getElementById("fold-board").addEventListener("click", () => {
+    state.boardFolded = !state.boardFolded;
+    applyFolds();
+  });
+  applyFolds();
   const board = document.getElementById("board");
   board.addEventListener("dragover", (event) => { event.preventDefault(); board.classList.add("drop"); });
   board.addEventListener("dragleave", () => board.classList.remove("drop"));
@@ -1045,6 +1071,7 @@ function setMode(mode) {
   document.getElementById("mode-blocks").classList.toggle("on", mode === "blocks");
   document.getElementById("mode-figures").classList.toggle("on", mode === "figures");
   hideHover();
+  applyFolds();
   renderBoard();
   renderEditor();
 }

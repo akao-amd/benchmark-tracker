@@ -110,9 +110,9 @@ Do not print a download body. A protected package decoded as text is a string of
 
 ## The page
 
-Left: a file browser. Empty path lists drives. Names starting with `.` are hidden. Entries are newest mtime first, folders and files together, capped at 400. Each folder row has Add. There is no button that ingests the folder you are merely looking at.
+Left: a file browser. Empty path lists drives. Names starting with `.` are hidden. Entries are newest mtime first, folders and files together, capped at 400. Each folder row has Add. There is no button that ingests the folder you are merely looking at. A control on the right edge folds the list down to a Files rail.
 
-Right: cards, or Figures. Hover shows the label and the non-empty attributes. Click opens the editor. A card drag carries `block:<id>`. A path drop on a card adopts. A path drop on the board ingests by filename. A `block:` drop on the board is ignored.
+Right: cards, or Figures. Hover shows the label and the non-empty attributes. Click opens the editor, which stays beside the cards until the same kind of control folds the cards away. The editor then uses the width that is left. A card drag carries `block:<id>`. A path drop on a card adopts. A path drop on the board ingests by filename. A `block:` drop on the board is ignored.
 
 `GET /api/workspace` is the whole view, including the OneDrive target label. `GET /api/fs?path=` lists a directory. `POST /api/act` is `new`, `import`, `ingest`, `patch`, `delete`, `move`, `merge`, `delete_point`, `clear_notices`, or `model`. `ingest` takes `into` for adopt. A collision is HTTP 409 with `collisions` and `notices`, and the archive is unchanged.
 

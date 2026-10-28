@@ -29,11 +29,20 @@ h2 { margin: 0 0 8px; font-size: 15px; }
 #error { padding: 8px 12px; background: #fff4f4; color: #8d1d1d; border-bottom: 1px solid #f0d0d0; }
 #error.ok { background: #f3faef; color: #1d6b32; border-bottom-color: #d5e8cc; }
 #app { display: flex; flex: 1; min-height: 0; }
-#files { width: 250px; flex: none; overflow: auto; background: #f6f6f4; border-right: 1px solid #e4e4e4; padding: 8px; }
-#stage { flex: 1; min-width: 0; display: flex; }
+#files-pane { width: 272px; flex: none; display: flex; min-height: 0; background: #f6f6f4; border-right: 1px solid #e4e4e4; }
+#files-pane.folded { width: 32px; }
+#files { flex: 1; min-width: 0; overflow: auto; padding: 8px 4px 8px 8px; }
+#files-pane.folded #files { display: none; }
+#stage { flex: 1; min-width: 0; display: flex; min-height: 0; }
+#board-pane { flex: 1; min-width: 0; display: flex; min-height: 0; }
+#board-pane.folded { flex: none; width: 32px; border-right: 1px solid #e4e4e4; }
 #board { flex: 1; min-width: 0; overflow: auto; padding: 14px; background: #fff; }
+#board-pane.folded #board { display: none; }
 #board.drop { outline: 2px dashed #92D050; outline-offset: -8px; }
 #editor { width: 460px; flex: none; overflow: auto; border-left: 1px solid #e4e4e4; padding: 12px; background: #fff; }
+#app.board-folded #editor { flex: 1; width: auto; border-left: 0; }
+.fold { flex: none; align-self: flex-start; width: 22px; margin-top: 8px; border: 0; background: transparent; color: #555; padding: 4px 0; }
+.folded .fold { align-self: stretch; width: 32px; margin-top: 0; writing-mode: vertical-rl; padding: 12px 0; }
 .crumbs { display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 8px; }
 .crumbs button { border: 0; background: transparent; padding: 0 2px; color: #333; }
 .file { display: flex; gap: 4px; align-items: center; margin: 1px 0; }

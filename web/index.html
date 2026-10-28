@@ -29,9 +29,15 @@
 </div>
 <div id="error" hidden></div>
 <div id="app">
-  <aside id="files"></aside>
+  <div id="files-pane">
+    <aside id="files"></aside>
+    <button type="button" id="fold-files" class="fold" title="Fold files" aria-expanded="true">‹</button>
+  </div>
   <div id="stage">
-    <div id="board"></div>
+    <div id="board-pane">
+      <div id="board"></div>
+      <button type="button" id="fold-board" class="fold" title="Fold blocks" aria-expanded="true">‹</button>
+    </div>
     <aside id="editor" hidden></aside>
   </div>
 </div>
