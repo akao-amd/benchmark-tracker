@@ -74,6 +74,7 @@ class App:
                 archive.model = loaded.model
                 archive.blocks = loaded.blocks
                 archive.notices = loaded.notices
+                archive.baseline_id = loaded.baseline_id
 
             self.workspace.mutate(change)
             return self.view()
@@ -83,8 +84,11 @@ class App:
                 archive.model = ""
                 archive.blocks = []
                 archive.notices = []
+                archive.baseline_id = None
             elif action == "model":
                 archive.model = str(body.get("model") or "")
+            elif action == "baseline":
+                archive.set_baseline(body.get("id"))
             elif action == "clear_notices":
                 archive.notices = []
             elif action == "patch":

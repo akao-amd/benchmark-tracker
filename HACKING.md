@@ -35,9 +35,9 @@ Tests construct their own temporary archives. Do not point a test at the process
 
 ## The archive
 
-`format` is `"bta"`, `version` is `1`. Pretty JSON. A file holds a model name, up to 200 notices, and blocks. Block ids are unique. Labels are unique.
+`format` is `"bta"`, `version` is `1`. Pretty JSON. A file holds a model name, one baseline, up to 200 notices, and blocks. Block ids are unique. Labels are unique among current blocks.
 
-A block has a label, a GPU divisor (`gpus`, default 1), optional attributes, a chosen baseline, a chart flag, an active run, and measurements. Known attribute names are docker image, host name, accuracy score, BKC, chip, framework, and tp. Any other name is allowed. Empty known keys are kept so the editor always shows them.
+A block has a label, a GPU divisor (`gpus`, default 1), optional attributes, a chart flag, an active run, and measurements. The archive has one baseline, chosen in the header. Every other current block is compared with that block. A file from before that field takes the baseline most current blocks already pointed at; a tie uses the earlier block. An explicit empty baseline stays empty. Known attribute names are docker image, host name, accuracy score, BKC, chip, framework, and tp. Any other name is allowed. Empty known keys are kept so the editor always shows them.
 
 A measurement is one `(input_len, output_len, concurrency, run)`. Throughput is stored as the server total. Per-GPU throughput is `server_total / gpus`, so changing the divisor does not reread files. Interactivity is `1000 / median_tpot_ms` and is not divided by the GPU count. Both are computed, not stored. `source` is the path the numbers came from. If that file later disappears, the numbers stay and the link is marked missing.
 
@@ -59,7 +59,7 @@ The walk skips `.git`, `__pycache__`, `node_modules`, and `.venv`, does not foll
 
 Logs are matched case-insensitively on three lines: `Total token throughput (tok/s):`, `Median TTFT (ms):`, `Median TPOT (ms):`. JSON checks total-token throughput against the reported pieces within 5%, and checks isl, osl, and concurrency against the filename when the JSON has those fields. Framework is filled from the JSON `backend` when the block's framework attribute is still empty.
 
-Dropping a directory on the empty board creates one block per filename label. Dropping it on a card adopts every loaded point into that card. The filename label is ignored. A key the card already has stays as it is. Empty attribute keys on the receiving block are filled. Label, GPU divisor, baseline, and chart membership stay on the receiving block.
+Dropping a directory on the empty board creates one block per filename label. Dropping it on a card adopts every loaded point into that card. The filename label is ignored. A key the card already has stays as it is. Empty attribute keys on the receiving block are filled. Label, GPU divisor, and chart membership stay on the receiving block.
 
 A label that already exists is a 409. Nothing is written until the client sends `overwrite` or `rename`. Overwrite replaces points and sources and fills only empty attributes. The selected run is kept when that run still exists. Rename suggests `label (2)`, then `(3)`.
 
@@ -69,9 +69,9 @@ A `.bta` dropped as results is refused. Import it instead. Import replaces the w
 
 Right-click a card for Ref and Retire. Ref lists the directories the block was built from, and clicking one copies that path. A merge or a drop onto the card adds the new directory. A directory inside another recorded one is omitted, and the list never goes down to the `.json` or `.log`. Retire keeps the block in the file, takes it off the sheet and the figure, and frees its label so the next import of that name is a new current block. Restore puts it back unless that label is already current. Several retired generations may share one label. Each block records `added_at` when it is created, and `retired_at` when it steps aside. The card shows those times, and the editor lists every block with that label, newest first. A block saved before this stamp has no added time. The sheet and the figure use the current block.
 
-Drag a card onto another card to merge. Non-colliding points always move. For a key in both blocks, the choice is `overwrite`, `keep`, `worse`, or `better`. Better ranks by higher per-GPU throughput, then lower median TTFT, then lower median TPOT, using each block's own divisor. An equal rank keeps the target for both better and worse. The source block is deleted. Dependents that used it as a baseline lose that link. "Always this" lives in the page only and clears on refresh. The default radio is Keep.
+Drag a card onto another card to merge. Non-colliding points always move. For a key in both blocks, the choice is `overwrite`, `keep`, `worse`, or `better`. Better ranks by higher per-GPU throughput, then lower median TTFT, then lower median TPOT, using each block's own divisor. An equal rank keeps the target for both better and worse. The source block is deleted. Deleting or retiring the baseline clears it for the whole archive. "Always this" lives in the page only and clears on refresh. The default radio is Keep.
 
-Copy attributes snapshots the attribute list in the page. Paste replaces the whole set and asks when the target already has a value. GPU divisor, baseline, and chart membership are not copied.
+Copy attributes snapshots the attribute list in the page. Paste replaces the whole set and asks when the target already has a value. GPU divisor and chart membership are not copied.
 
 Search is hidden until Search or `/`. It matches the label and non-empty attribute values. Escape closes search, then deselects. The client serializes `POST /api/act` through one promise queue.
 

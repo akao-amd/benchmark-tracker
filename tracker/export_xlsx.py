@@ -219,10 +219,10 @@ def workbook_bytes(archive: Archive, book=None, sheet_title: str = "Benchmark") 
     by_id = {block.id: block for block in archive.blocks}
 
     def baseline_of(block: Block) -> Block | None:
-        if block.retired or block.baseline or not block.baseline_id:
+        if block.retired or not archive.baseline_id or block.id == archive.baseline_id:
             return None
-        target = by_id.get(block.baseline_id)
-        if target is None or not target.baseline or target.retired:
+        target = by_id.get(archive.baseline_id)
+        if target is None or target.retired:
             return None
         return target
 

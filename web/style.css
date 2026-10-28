@@ -20,8 +20,8 @@ header {
 h1 { margin: 0 8px 0 0; font-size: 16px; font-weight: 650; }
 h2 { margin: 0 0 8px; font-size: 15px; }
 .model { display: flex; gap: 6px; align-items: center; color: #555; }
-.model input, #search { border: 1px solid #c8c8c8; border-radius: 4px; padding: 4px 8px; }
-.model input { width: 220px; }
+.model input, #search, #baseline { border: 1px solid #c8c8c8; border-radius: 4px; padding: 4px 8px; }
+.model input, #baseline { width: 220px; }
 .modes { display: flex; gap: 4px; }
 #meta { color: #666; font-size: 12px; margin-left: auto; }
 #searchbar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid #e4e4e4; background: #fafafa; }

@@ -125,6 +125,7 @@ function setWorkspace(workspace, rebuildEditor) {
   state.workspace = workspace;
   const model = document.getElementById("model");
   if (document.activeElement !== model) model.value = workspace.model || "";
+  renderBaseline();
   renderMeta();
   renderBoard();
   if (rebuildEditor) renderEditor();
@@ -214,6 +215,16 @@ function openCollision(collisions, notices) {
   document.getElementById("onedrive-form").hidden = true;
   document.getElementById("collision-form").hidden = false;
   document.getElementById("modal").hidden = false;
+}
+
+function renderBaseline() {
+  const select = document.getElementById("baseline");
+  if (!select || document.activeElement === select) return;
+  const chosen = state.workspace.baseline_id || "";
+  const blocks = (state.workspace.blocks || []).filter((block) => !block.retired);
+  select.replaceChildren(h("option", { value: "", text: "No baseline" }));
+  blocks.forEach((block) => select.append(h("option", { value: block.id, text: block.label })));
+  select.value = blocks.some((block) => block.id === chosen) ? chosen : "";
 }
 
 function renderMeta() {
@@ -673,25 +684,12 @@ function renderEditor() {
     aside.append(field("Run", select));
     aside.append(h("p", { class: "hint", text: "Other runs stay in the file. The sheet and the figure use this one." }));
   }
-  const baseline = h("input", { type: "checkbox" });
-  baseline.checked = !!block.baseline;
-  baseline.addEventListener("change", () => patch({ baseline: baseline.checked }, true));
   const chart = h("input", { type: "checkbox" });
   chart.checked = !!block.chart;
   chart.addEventListener("change", () => patch({ chart: chart.checked }, false).then(renderBoard));
   aside.append(h("div", { class: "checks" }, [
-    h("label", {}, [baseline, document.createTextNode("Baseline")]),
     h("label", {}, [chart, document.createTextNode("On figure")]),
   ]));
-  if (!block.baseline) {
-    const select = h("select");
-    select.append(h("option", { value: "", text: "No baseline" }));
-    (state.workspace.blocks || []).filter((item) => item.baseline && !item.retired && item.id !== block.id).forEach((item) => {
-      select.append(h("option", { value: item.id, text: item.label, selected: item.id === block.baseline_id ? "selected" : null }));
-    });
-    select.addEventListener("change", () => patch({ baseline_id: select.value || null }, true));
-    aside.append(field("Ratio against", select));
-  }
   aside.append(h("h2", { text: "Attributes" }));
   const copyAttrs = h("button", { type: "button", text: "Copy attributes" });
   copyAttrs.addEventListener("click", () => {
@@ -962,6 +960,9 @@ function wire() {
   document.getElementById("model").addEventListener("change", async (event) => {
     try { setWorkspace(await act({ action: "model", model: event.target.value }), false); } catch (error) { showError(error); }
   });
+  document.getElementById("baseline").addEventListener("change", async (event) => {
+    try { setWorkspace(await act({ action: "baseline", id: event.target.value || null }), true); } catch (error) { showError(error); }
+  });
   document.getElementById("search-toggle").addEventListener("click", () => toggleSearch(true));
   document.getElementById("search").addEventListener("input", (event) => {
     state.query = event.target.value;
@@ -1054,6 +1055,7 @@ async function boot() {
   try {
     state.workspace = await readJson(await fetch("/api/workspace"));
     document.getElementById("model").value = state.workspace.model || "";
+    renderBaseline();
     state.fs = await readJson(await fetch("/api/fs?path=" + encodeURIComponent(state.workspace.browser_root || "")));
     renderMeta();
     renderFiles();
