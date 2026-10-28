@@ -180,13 +180,11 @@ class ModelTest(unittest.TestCase):
             blocks, _notices, _model = scan_path(Path(tmp))
             archive = Archive(model="gpt-oss-120b", blocks=blocks)
             base, cand = archive.blocks
-            archive.baseline_id = base.id
+            base.baseline = True
+            cand.baseline_id = base.id
             cand.chart = True
             base.chart = True
             view = archive.present()
-            self.assertEqual(view["baseline_id"], base.id)
-            self.assertTrue(view["blocks"][0]["baseline"])
-            self.assertEqual(view["blocks"][1]["baseline_label"], base.label)
             shape = view["blocks"][1]["shapes"][0]
             ratios = [row["ratios"]["tput"] for row in shape["rows"]]
             self.assertEqual(ratios, [2, 8])
@@ -221,36 +219,28 @@ class ModelTest(unittest.TestCase):
             fresh.apply_scan(incoming, more, {"tp1": {"action": "rename", "label": "tp1 (2)"}}, hint)
             self.assertEqual([block.label for block in fresh.blocks], ["tp1", "tp1 (2)"])
 
-    def test_one_baseline_replaces_per_block_choices(self):
+    def test_shared_baseline_file_becomes_a_choice_on_each_block(self):
         with tempfile.TemporaryDirectory() as tmp:
-            write_bench(tmp, "a", 1024, 1024, 4)
-            write_bench(tmp, "b", 1024, 1024, 4)
-            write_bench(tmp, "c1", 1024, 1024, 4)
-            write_bench(tmp, "c2", 1024, 1024, 4)
-            write_bench(tmp, "c3", 1024, 1024, 4)
-            blocks, _notices, _model = scan_path(Path(tmp))
-            by = {block.label: block for block in blocks}
-            raw = json.loads(Archive(blocks=blocks).dumps())
-            del raw["baseline_id"]
-            for item in raw["blocks"]:
-                item["baseline"] = item["label"] in {"a", "b"}
-                item["baseline_id"] = None
-            ids = {item["label"]: item["id"] for item in raw["blocks"]}
-            for item in raw["blocks"]:
-                if item["label"] in {"c1", "c2"}:
-                    item["baseline_id"] = ids["a"]
-                elif item["label"] == "c3":
-                    item["baseline_id"] = ids["b"]
+            write_bench(tmp, "base", 1024, 1024, 4)
+            write_bench(tmp, "cand", 1024, 1024, 4)
+            blocks, _notices, model = scan_path(Path(tmp))
+            raw = json.loads(Archive(blocks=blocks, model=model).dumps())
+            base_id = next(block["id"] for block in raw["blocks"] if block["label"] == "base")
+            raw["baseline_id"] = base_id
+            for block in raw["blocks"]:
+                block.pop("baseline", None)
+                block.pop("baseline_id", None)
             loaded = Archive.load(json.dumps(raw))
-            self.assertEqual(loaded.baseline_id, by["a"].id)
-            self.assertFalse(any(block.baseline or block.baseline_id for block in loaded.blocks))
-            kept = json.loads(json.dumps(raw))
-            kept["baseline_id"] = ids["b"]
-            explicit = Archive.load(json.dumps(kept))
-            self.assertEqual(explicit.baseline_id, by["b"].id)
-            kept["baseline_id"] = None
-            cleared = Archive.load(json.dumps(kept))
-            self.assertIsNone(cleared.baseline_id)
+            by = {block.label: block for block in loaded.blocks}
+            self.assertTrue(by["base"].baseline)
+            self.assertIsNone(by["base"].baseline_id)
+            self.assertEqual(by["cand"].baseline_id, base_id)
+            self.assertEqual(loaded.present()["blocks"][loaded.blocks.index(by["cand"])]["baseline_label"], "base")
+            raw["blocks"][1]["baseline"] = True
+            raw["baseline_id"] = raw["blocks"][0]["id"]
+            kept = Archive.load(json.dumps(raw))
+            self.assertTrue(any(block.baseline for block in kept.blocks))
+            self.assertFalse(any(block.baseline_id == raw["blocks"][0]["id"] for block in kept.blocks))
 
     def test_refs_stay_at_the_directory_and_retire_frees_the_label(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -329,10 +319,11 @@ class ModelTest(unittest.TestCase):
             blocks, _notices, model = scan_path(Path(tmp))
             by = {block.label: block for block in blocks}
             archive = Archive(model=model, blocks=[by["MI355"], by["GB300"]])
-            archive.baseline_id = archive.blocks[0].id
+            archive.blocks[0].baseline = True
             archive.blocks[0].chart = True
             archive.blocks[0].attributes["chip"] = "MI355"
             archive.blocks[0].attributes["=chip"] = "=not-a-formula"
+            archive.blocks[1].baseline_id = archive.blocks[0].id
             archive.blocks[1].chart = True
             archive.blocks[1].attributes["docker image"] = "image"
             archive.blocks[1].attributes["host name"] = "box"
@@ -377,7 +368,8 @@ class ModelTest(unittest.TestCase):
             blocks, _notices, _model = scan_path(Path(tmp))
             by = {block.label: block for block in blocks}
             archive = Archive(blocks=[by["base"], by["cand"]])
-            archive.baseline_id = archive.blocks[0].id
+            archive.blocks[0].baseline = True
+            archive.blocks[1].baseline_id = archive.blocks[0].id
             from openpyxl import load_workbook
             sheet = load_workbook(io.BytesIO(workbook_bytes(archive))).active
             self.assertIsNone(sheet["I18"].value)
@@ -449,9 +441,11 @@ class ModelTest(unittest.TestCase):
             write_bench(tmp, "cand", 1024, 1024, 8)
             blocks, _notices, model = scan_path(Path(tmp))
             by = {block.label: block for block in blocks}
+            by["base"].baseline = True
             by["base"].chart = True
+            by["cand"].baseline_id = by["base"].id
             by["cand"].chart = True
-            archive = Archive(model=model, blocks=[by["base"], by["cand"]], baseline_id=by["base"].id)
+            archive = Archive(model=model, blocks=[by["base"], by["cand"]])
         plan = describe(workbook_bytes(archive, sheet_title="bta-1023-0700"))
         flat = [cell for chunk in plan["chunks"] for row in chunk["formulas"] for cell in row]
         self.assertIn("=W7", flat)
@@ -644,10 +638,7 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(view["blocks"][0]["attributes"][0]["value"], "rocm/sgl")
         copy_id = view["blocks"][1]["id"]
         status, view = self.request("POST", "/api/act", {"action": "patch", "id": block_id, "label": "MI355 TP1"})
-        status, view = self.request("POST", "/api/act", {"action": "patch", "id": copy_id, "chart": True})
-        status, view = self.request("POST", "/api/act", {"action": "baseline", "id": block_id})
-        self.assertEqual(view["baseline_id"], block_id)
-        self.assertTrue(view["blocks"][0]["baseline"])
+        status, view = self.request("POST", "/api/act", {"action": "patch", "id": copy_id, "baseline_id": block_id, "chart": True})
         self.assertEqual(view["blocks"][1]["baseline_label"], "MI355 TP1")
         self.assertEqual(len(view["figures"]), 3)
         status, xlsx = self.request("GET", "/api/export.xlsx")
@@ -662,7 +653,6 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 200, view)
         self.assertGreater(view["blocks"][0]["missing"], 0)
         self.assertEqual(view["blocks"][0]["label"], "MI355 TP1")
-        self.assertEqual(view["baseline_id"], block_id)
         status, view = self.request("POST", "/api/act", {"action": "delete", "id": copy_id})
         self.assertEqual(len(view["blocks"]), 1)
         page = urllib.request.urlopen(f"http://127.0.0.1:{self.port}/").read().decode()

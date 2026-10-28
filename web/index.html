@@ -16,7 +16,6 @@
   <button type="button" id="save-xlsx">Export .xlsx</button>
   <button type="button" id="save-onedrive" title="Add a new sheet to a OneDrive workbook">Add tab</button>
   <label class="model">Model <input id="model" spellcheck="false" autocomplete="off"></label>
-  <label class="model">Baseline <select id="baseline"></select></label>
   <button type="button" id="search-toggle">Search</button>
   <div class="modes">
     <button type="button" id="mode-blocks" class="on">Blocks</button>
@@ -39,7 +38,7 @@
 <div id="modal" hidden>
   <form id="collision-form">
     <h2>These labels are already in the workspace</h2>
-    <p class="hint">Overwrite replaces the measurements and keeps the label, attributes, GPU divisor, figure choice, selected run, and which shapes are included. Rename adds another block. The baseline is the one chosen for the whole workspace.</p>
+    <p class="hint">Overwrite replaces the measurements and keeps the label, attributes, GPU divisor, baseline, figure choice, selected run, and which shapes are included. Rename adds another block.</p>
     <div id="collision-list"></div>
     <p id="collision-notes"></p>
     <div class="actions">

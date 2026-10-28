@@ -287,6 +287,8 @@ class Block:
         return {
             "id": self.id,
             "label": self.label,
+            "baseline": self.baseline,
+            "baseline_id": self.baseline_id,
             "chart": self.chart,
             "gpus": _json_number(self.gpus),
             "active_run": self.active_run,
@@ -367,6 +369,24 @@ def _rank(point: Point, gpus: float) -> tuple:
     return (point.per_gpu(gpus), -point.median_ttft_ms, -point.median_tpot_ms)
 
 
+def _spread_shared_baseline(raw: dict, blocks: list, known: dict) -> None:
+    """A file that stored one baseline for the archive becomes a choice on each block."""
+    if any(block.baseline or block.baseline_id for block in blocks):
+        return
+    stored = raw.get("baseline_id")
+    if stored in (None, ""):
+        return
+    stored = _text(stored, "baseline_id").strip()
+    target = known.get(stored)
+    if target is None or target.retired:
+        return
+    target.baseline = True
+    for block in blocks:
+        if block.retired or block.id == target.id:
+            continue
+        block.baseline_id = target.id
+
+
 def _prefer_incoming(choice: str, incoming: Point, incoming_gpus: float, current: Point, current_gpus: float) -> bool:
     if choice == "overwrite":
         return True
@@ -379,47 +399,17 @@ def _prefer_incoming(choice: str, incoming: Point, incoming_gpus: float, current
     return incoming_rank < current_rank
 
 
-def _shared_baseline(raw: dict, blocks: list, known: dict) -> str | None:
-    """One baseline for the archive. Older files stored a choice on each block."""
-    if "baseline_id" in raw:
-        stored = raw.get("baseline_id")
-        if stored in (None, ""):
-            return None
-        stored = _text(stored, "baseline_id").strip()
-        target = known.get(stored)
-        if target is not None and not target.retired:
-            return stored
-        return None
-    votes = []
-    for block in blocks:
-        if block.retired or not block.baseline_id or block.baseline_id == block.id:
-            continue
-        target = known.get(block.baseline_id)
-        if target is None or target.retired:
-            continue
-        votes.append(block.baseline_id)
-    if votes:
-        order = {block.id: index for index, block in enumerate(blocks)}
-        return max(set(votes), key=lambda item: (votes.count(item), -order[item]))
-    marked = [block for block in blocks if block.baseline and not block.retired]
-    if len(marked) == 1:
-        return marked[0].id
-    return None
-
-
 @dataclass
 class Archive:
     model: str = ""
     blocks: list[Block] = field(default_factory=list)
     notices: list[dict] = field(default_factory=list)
-    baseline_id: str | None = None
 
     def dumps(self) -> str:
         payload = {
             "format": FORMAT,
             "version": VERSION,
             "model": self.model,
-            "baseline_id": self.baseline_id,
             "notices": self.notices[-200:],
             "blocks": [block.to_dict() for block in self.blocks],
         }
@@ -444,42 +434,26 @@ class Archive:
         if len(active_labels) != len(set(active_labels)):
             raise ArchiveError("two blocks share a label")
         known = {block.id: block for block in blocks}
-        chosen = _shared_baseline(raw, blocks, known)
         for block in blocks:
-            block.baseline = False
-            block.baseline_id = None
+            if block.baseline_id and block.baseline_id not in known:
+                block.baseline_id = None
+            elif block.baseline_id and known[block.baseline_id].retired:
+                block.baseline_id = None
+            if block.baseline_id == block.id:
+                block.baseline_id = None
+        _spread_shared_baseline(raw, blocks, known)
         notices = []
         for item in raw.get("notices") or []:
             if isinstance(item, dict) and isinstance(item.get("message"), str):
                 kind = item.get("kind") if item.get("kind") in ("skip", "note") else "skip"
                 notices.append({"path": _text(item.get("path", ""), "notice path"), "message": item["message"], "kind": kind})
-        return cls(
-            model=_text(raw.get("model", ""), "model"),
-            blocks=blocks,
-            notices=notices[-200:],
-            baseline_id=chosen,
-        )
+        return cls(model=_text(raw.get("model", ""), "model"), blocks=blocks, notices=notices[-200:])
 
     def block(self, block_id: str) -> Block:
         for block in self.blocks:
             if block.id == block_id:
                 return block
         raise ArchiveError(f"no block {block_id}")
-
-    def set_baseline(self, block_id: str | None) -> None:
-        if block_id in (None, ""):
-            self.baseline_id = None
-            return
-        target = self.block(str(block_id))
-        if target.retired:
-            raise ArchiveError(f"{target.label} is retired")
-        self.baseline_id = target.id
-
-    def _clear_baseline(self, block_id: str, label: str) -> None:
-        if self.baseline_id != block_id:
-            return
-        self.baseline_id = None
-        self.add_notice(label, f"{label} was the baseline, so there is no baseline now")
 
     def add_notice(self, path: str, message: str, kind: str = "note") -> None:
         if kind not in ("skip", "note"):
@@ -688,6 +662,30 @@ class Archive:
                     raise ArchiveError("excluded shape must be [input_len, output_len]")
                 shapes.append((_int(item[0], "input_len"), _int(item[1], "output_len")))
             block.excluded_shapes = shapes
+        if "baseline" in fields:
+            turning_off = block.baseline and not bool(fields["baseline"])
+            block.baseline = bool(fields["baseline"])
+            if block.baseline:
+                block.baseline_id = None
+            elif turning_off:
+                for other in self.blocks:
+                    if other.baseline_id == block.id:
+                        other.baseline_id = None
+                        self.add_notice(other.label, f"{other.label} no longer has a baseline")
+        if "baseline_id" in fields and not block.baseline:
+            baseline_id = fields["baseline_id"]
+            if baseline_id in (None, ""):
+                block.baseline_id = None
+            else:
+                baseline_id = _text(baseline_id, "baseline_id")
+                if baseline_id == block.id:
+                    raise ArchiveError("a block cannot be its own baseline")
+                target = self.block(baseline_id)
+                if target.retired:
+                    raise ArchiveError(f"{target.label} is retired")
+                if not target.baseline:
+                    raise ArchiveError(f"mark {target.label} as a baseline first")
+                block.baseline_id = baseline_id
         if "retired" in fields:
             turning_on = bool(fields["retired"]) and not block.retired
             turning_off = not bool(fields["retired"]) and block.retired
@@ -699,14 +697,24 @@ class Archive:
             block.retired = bool(fields["retired"])
             if turning_on:
                 block.retired_at = stamp()
-                self._clear_baseline(block.id, block.label)
+                block.baseline = False
+                block.baseline_id = None
+                for other in self.blocks:
+                    if other.baseline_id == block.id:
+                        other.baseline_id = None
+                        self.add_notice(other.label, f"{other.label} no longer has a baseline")
             elif turning_off:
                 block.retired_at = ""
+        if block.baseline:
+            block.baseline_id = None
 
     def delete(self, block_id: str) -> None:
         block = self.block(block_id)
         self.blocks = [item for item in self.blocks if item.id != block.id]
-        self._clear_baseline(block.id, block.label)
+        for other in self.blocks:
+            if other.baseline_id == block.id:
+                other.baseline_id = None
+                self.add_notice(other.label, f"{other.label} no longer has a baseline")
 
     def move(self, block_id: str, direction: int) -> None:
         block = self.block(block_id)
@@ -740,16 +748,15 @@ class Archive:
             "model": self.model,
             "path": path,
             "notices": list(self.notices),
-            "baseline_id": self.baseline_id,
             "blocks": blocks,
             "figures": self._figures(by_id),
         }
 
     def _baseline_for(self, block: Block, by_id: dict[str, Block]) -> Block | None:
-        if block.retired or not self.baseline_id or block.id == self.baseline_id:
+        if block.baseline or not block.baseline_id:
             return None
-        target = by_id.get(self.baseline_id)
-        if target is None or target.retired:
+        target = by_id.get(block.baseline_id)
+        if target is None or not target.baseline or target.retired:
             return None
         return target
 
@@ -823,7 +830,8 @@ class Archive:
         return {
             "id": block.id,
             "label": block.label,
-            "baseline": block.id == self.baseline_id and not block.retired,
+            "baseline": block.baseline,
+            "baseline_id": block.baseline_id,
             "baseline_label": baseline.label if baseline is not None else "",
             "chart": block.chart,
             "gpus": _json_number(block.gpus),
