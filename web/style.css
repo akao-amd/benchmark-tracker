@@ -101,6 +101,6 @@ td.miss { color: #8d1d1d; }
 .choice .opts { display: flex; gap: 12px; align-items: center; }
 .choice input[type="text"] { flex: 1; border: 1px solid #c8c8c8; border-radius: 4px; padding: 4px 6px; }
 .figure { margin: 0 0 22px; }
-.figure svg { width: 100%; height: auto; background: #404040; border-radius: 6px; }
-.figure .readout { margin-top: 6px; }
+.figure svg { width: 100%; height: auto; background: #404040; border-radius: 6px; cursor: copy; }
+.figure svg [data-series] { cursor: pointer; }
 .from { color: #777; font-size: 12px; word-break: break-all; }

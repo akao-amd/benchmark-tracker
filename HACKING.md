@@ -83,7 +83,7 @@ Summary throughput, TTFT, and TPOT are formulas into the raw block. Interactivit
 
 The green chip is the chip attribute, or the block label when chip is empty, with framework beside it. The block label is not also written into the accuracy column. The versus banner is `{label} v.s. {baseline}` on a yellow merge. Docker, machine, accuracy, date, and BKC sit on the rows under the chip. Gridlines are off. The page is landscape, fit to width. Column A is a narrow gutter.
 
-One scatter per shape, and only for blocks with chart on. X is interactivity, Y is throughput per GPU. The line follows concurrency order. It is not sorted by X. The chart skin is dark (`#404040`) with the Office series colors. The in-app figure is the same series as an SVG, with the title inside the SVG.
+One scatter per shape, and only for blocks with chart on. X is interactivity, Y is throughput per GPU. The line follows concurrency order. It is not sorted by X. The chart skin is dark (`#404040`) with the Office series colors. The in-app figure is that SVG and nothing under it. Clicking the plot copies a PNG, which is what a slide or a mail message pastes as a picture. Clicking a line, a point, or its legend clears that block's chart flag, the same as turning off On figure, and the figure is drawn again without it.
 
 A string that starts with `=` is stored as text. `formula()` is what marks a cell as a formula.
 

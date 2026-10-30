@@ -568,26 +568,67 @@ function renderFigures(board, blocks) {
     board.append(h("p", { class: "empty", text: "Tick “On figure” on a block to draw throughput per GPU against interactivity. The line follows concurrency order." }));
     return;
   }
+  board.append(h("p", { class: "hint", text: "Click a figure to copy it. Click a line to take that block off the figure." }));
   figures.forEach((figure) => board.append(figureView(figure)));
 }
 
 function figureView(figure) {
   const wrap = h("section", { class: "figure" });
-  wrap.append(draw(figure));
-  const table = h("table");
-  table.append(h("tr", {}, ["", "conc", "tok/s/gpu", "interactivity"].map((name) => h("th", { text: name }))));
-  figure.series.forEach((series) => {
-    series.points.forEach((point, index) => {
-      const row = h("tr");
-      row.append(cell(index ? "" : series.label));
-      row.append(cell(point.concurrency));
-      row.append(cell(num(point.y, 0), point.y));
-      row.append(cell(num(point.x, 2), point.x));
-      table.append(row);
-    });
-  });
-  wrap.append(h("div", { class: "scroll readout" }, [table]));
+  const svg = draw(figure);
+  svg.addEventListener("click", () => copyFigure(svg));
+  wrap.append(svg);
   return wrap;
+}
+
+function svgPng(svg) {
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("width", "1760");
+  clone.setAttribute("height", "920");
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const xml = new XMLSerializer().serializeToString(clone);
+  const url = URL.createObjectURL(new Blob([xml], { type: "image/svg+xml;charset=utf-8" }));
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1760;
+      canvas.height = 920;
+      canvas.getContext("2d").drawImage(image, 0, 0, 1760, 920);
+      URL.revokeObjectURL(url);
+      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Could not draw the figure."))), "image/png");
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Could not draw the figure."));
+    };
+    image.src = url;
+  });
+}
+
+async function copyFigure(svg) {
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.write || !window.ClipboardItem) {
+      throw new Error("This browser cannot put a picture on the clipboard.");
+    }
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": svgPng(svg) })]);
+    showStatus("Copied the figure as a PNG.");
+  } catch (error) {
+    const message = String(error && error.message || error);
+    if (/not focused|not allowed/i.test(message)) showError(new Error("Could not copy the figure. Click it again in this window."));
+    else showError(error);
+  }
+}
+
+async function hideSeries(label) {
+  const block = (state.workspace.blocks || []).find((item) => item.label === label && !item.retired);
+  if (!block) return;
+  showError("");
+  try {
+    setWorkspace(await act({ action: "patch", id: block.id, chart: false }), false);
+    showStatus(label + " is off the figure.");
+  } catch (error) {
+    showError(error);
+  }
 }
 
 function draw(figure) {
@@ -608,6 +649,7 @@ function draw(figure) {
   const sy = (value) => height - pad.b - (value - y0) / (y1 - y0) * (height - pad.t - pad.b);
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+  svg.setAttribute("font-family", "Segoe UI, sans-serif");
   const ns = "http://www.w3.org/2000/svg";
   function el(name, attrs) {
     const node = document.createElementNS(ns, name);
@@ -628,28 +670,78 @@ function draw(figure) {
   el("text", { x: width / 2, y: height - 12, fill: "#BFBFBF", "font-size": 12, "text-anchor": "middle" }).textContent = "Interactivity (token/s/user)";
   const yTitle = el("text", { x: 16, y: height / 2, fill: "#BFBFBF", "font-size": 12, "text-anchor": "middle", transform: "rotate(-90 16 " + (height / 2) + ")" });
   yTitle.textContent = "Total token throughput per GPU";
-  figure.series.forEach((series) => {
+  figure.series.forEach((series, index) => {
     const color = series.color || 0;
     const line = LINES[color % LINES.length];
     const mark = MARKS[color % MARKS.length];
+    const group = document.createElementNS(ns, "g");
+    group.setAttribute("data-series", series.label);
+    const taken = document.createElementNS(ns, "title");
+    taken.textContent = "Take " + series.label + " off the figure";
+    group.append(taken);
+    group.addEventListener("click", (event) => {
+      event.stopPropagation();
+      hideSeries(series.label);
+    });
+    const coords = series.points.map((point) => sx(point.x) + "," + sy(point.y)).join(" ");
     if (series.points.length > 1) {
-      el("polyline", {
-        fill: "none", stroke: line, "stroke-width": 2,
-        points: series.points.map((point) => sx(point.x) + "," + sy(point.y)).join(" "),
-      });
+      const hit = document.createElementNS(ns, "polyline");
+      hit.setAttribute("fill", "none");
+      hit.setAttribute("stroke", line);
+      hit.setAttribute("stroke-width", "16");
+      hit.setAttribute("stroke-opacity", "0");
+      hit.setAttribute("pointer-events", "stroke");
+      hit.setAttribute("points", coords);
+      group.append(hit);
+      const drawn = document.createElementNS(ns, "polyline");
+      drawn.setAttribute("fill", "none");
+      drawn.setAttribute("stroke", line);
+      drawn.setAttribute("stroke-width", "2");
+      drawn.setAttribute("pointer-events", "none");
+      drawn.setAttribute("points", coords);
+      group.append(drawn);
     }
     series.points.forEach((point) => {
-      const dot = el("circle", { cx: sx(point.x), cy: sy(point.y), r: 3.5, fill: mark, stroke: line });
+      const dot = document.createElementNS(ns, "circle");
+      dot.setAttribute("cx", sx(point.x));
+      dot.setAttribute("cy", sy(point.y));
+      dot.setAttribute("r", "3.5");
+      dot.setAttribute("fill", mark);
+      dot.setAttribute("stroke", line);
       const title = document.createElementNS(ns, "title");
       title.textContent = series.label + " c" + point.concurrency + "  " + num(point.y, 1) + " tok/s  " + num(point.x, 2) + " interactivity";
       dot.append(title);
+      group.append(dot);
     });
-  });
-  figure.series.forEach((series, index) => {
     const x = pad.l + (index % 3) * 250;
     const y = 40 + Math.floor(index / 3) * 14;
-    el("line", { x1: x, x2: x + 16, y1: y, y2: y, stroke: LINES[(series.color || 0) % LINES.length], "stroke-width": 2 });
-    el("text", { x: x + 20, y: y + 4, fill: "#D9D9D9", "font-size": 11 }).textContent = series.label;
+    const legend = document.createElementNS(ns, "rect");
+    legend.setAttribute("x", x - 4);
+    legend.setAttribute("y", y - 11);
+    legend.setAttribute("width", "220");
+    legend.setAttribute("height", "16");
+    legend.setAttribute("fill", "#000");
+    legend.setAttribute("fill-opacity", "0");
+    legend.setAttribute("pointer-events", "all");
+    group.append(legend);
+    const swatch = document.createElementNS(ns, "line");
+    swatch.setAttribute("x1", x);
+    swatch.setAttribute("x2", x + 16);
+    swatch.setAttribute("y1", y);
+    swatch.setAttribute("y2", y);
+    swatch.setAttribute("stroke", line);
+    swatch.setAttribute("stroke-width", "2");
+    swatch.setAttribute("pointer-events", "none");
+    group.append(swatch);
+    const name = document.createElementNS(ns, "text");
+    name.setAttribute("x", x + 20);
+    name.setAttribute("y", y + 4);
+    name.setAttribute("fill", "#D9D9D9");
+    name.setAttribute("font-size", "11");
+    name.setAttribute("pointer-events", "none");
+    name.textContent = series.label;
+    group.append(name);
+    svg.append(group);
   });
   return svg;
 }
