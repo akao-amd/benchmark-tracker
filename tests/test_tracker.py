@@ -219,6 +219,49 @@ class ModelTest(unittest.TestCase):
             fresh.apply_scan(incoming, more, {"tp1": {"action": "rename", "label": "tp1 (2)"}}, hint)
             self.assertEqual([block.label for block in fresh.blocks], ["tp1", "tp1 (2)"])
 
+    def test_namespace_prefixes_the_name_outside_the_group(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            write_bench(tmp, "MI450_MC_HAMMER_B0_TP1", 1024, 1024, 4)
+            write_bench(tmp, "MI450_MC_HAMMER_B0_TP2", 1024, 1024, 4)
+            blocks, _notices, model = scan_path(Path(tmp))
+            archive = Archive(blocks=blocks, model=model)
+            archive.add_namespace("MI450_MC_HAMMER_B0")
+            namespace = archive.namespaces[0].id
+            for block in list(archive.blocks):
+                block.chart = True
+                archive.place(block.id, namespace)
+            by = {block.label: block for block in archive.blocks}
+            self.assertEqual(set(by), {"TP1", "TP2"})
+            self.assertEqual(archive.effective_label(by["TP1"]), "MI450_MC_HAMMER_B0_TP1")
+            labels = {
+                series["label"]
+                for figure in archive.present()["figures"]
+                for series in figure["series"]
+            }
+            self.assertIn("MI450_MC_HAMMER_B0_TP1", labels)
+            loaded = Archive.load(archive.dumps())
+            self.assertEqual(loaded.namespaces[0].name, "MI450_MC_HAMMER_B0")
+            self.assertEqual({block.label for block in loaded.blocks}, {"TP1", "TP2"})
+            from openpyxl import load_workbook
+            book = load_workbook(io.BytesIO(workbook_bytes(archive)))
+            values = [cell.value for row in book.active.iter_rows() for cell in row]
+            self.assertIn("MI450_MC_HAMMER_B0_TP1", values)
+            self.assertNotIn("TP1", values)
+            archive.patch(by["TP1"].id, {"retired": True})
+            self.assertEqual(archive.effective_label(by["TP1"]), "MI450_MC_HAMMER_B0_TP1")
+            incoming, more, hint = scan_path(Path(tmp))
+            only = [block for block in incoming if block.label == "MI450_MC_HAMMER_B0_TP1"]
+            archive.apply_scan(only, more, None, hint)
+            current = [
+                block for block in archive.blocks
+                if not block.retired and archive.effective_label(block) == "MI450_MC_HAMMER_B0_TP1"
+            ]
+            self.assertEqual(len(current), 1)
+            self.assertEqual(current[0].namespace_id, "")
+            archive.place(by["TP2"].id, "")
+            self.assertEqual(by["TP2"].label, "MI450_MC_HAMMER_B0_TP2")
+            self.assertEqual(by["TP2"].namespace_id, "")
+
     def test_shared_baseline_file_becomes_a_choice_on_each_block(self):
         with tempfile.TemporaryDirectory() as tmp:
             write_bench(tmp, "base", 1024, 1024, 4)

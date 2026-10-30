@@ -51,7 +51,14 @@ h2 { margin: 0 0 8px; font-size: 15px; }
 .file.bench .name { color: #1d6b32; }
 .file.bta .name { color: #1d4e89; }
 .file .mini { padding: 2px 6px; }
+.flow { display: flex; flex-direction: column; gap: 12px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.namespace { background: rgba(80, 80, 80, 0.06); border: 1px solid rgba(80, 80, 80, 0.08); border-radius: 8px; padding: 8px 10px 12px; }
+.namespace.drop { outline: 2px dashed #1c1c1c; outline-offset: -4px; }
+.namespace .bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.namespace .name { border: 0; background: transparent; color: #555; font-weight: 650; padding: 2px 4px; }
+.namespace .quiet { margin-left: auto; border: 0; background: transparent; color: #888; padding: 2px 6px; }
+.namespace .slot { color: #888; font-size: 12px; margin: 2px 4px 0; }
 .card { border: 1px solid #e4e4e4; border-top: 4px solid #92D050; border-radius: 6px; padding: 8px; background: #fff; cursor: pointer; min-height: 92px; }
 .card.on { border-color: #1c1c1c; }
 .card.retired { border-top-color: #c8c8c8; }

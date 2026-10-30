@@ -256,12 +256,13 @@ def workbook_bytes(archive: Archive, book=None, sheet_title: str = "Benchmark") 
         chip = block.attr("chip")
         framework = block.attr("framework")
         tp = _tp_text(block.attr("tp")) if block.attr("tp") else ""
-        header_label = chip or block.label
+        name = archive.effective_label(block)
+        header_label = chip or name
         put(sheet.cell(top, SUMMARY_COL, header_label), header_label, face=bold, fill=green if header_label else None)
         put(sheet.cell(top, SUMMARY_COL + 1, framework), framework, face=bold, fill=green if framework else None)
         put(sheet.cell(top, SUMMARY_COL + 2, tp), tp, face=bold)
         if has_ratios:
-            versus = f"{block.label} v.s. {baseline.label}"
+            versus = f"{name} v.s. {archive.effective_label(baseline)}"
             put(sheet.cell(top, SUMMARY_COL + 7, versus), versus, face=bold, fill=ratio_fill, align=left)
             sheet.merge_cells(start_row=top, start_column=SUMMARY_COL + 7, end_row=top, end_column=SUMMARY_COL + 9)
         docker = block.attr("docker image")
@@ -458,7 +459,7 @@ def _charts(sheet, archive, layouts, content_bottom, ScatterChart, Series, Serie
             x_values = Reference(sheet, min_col=SUMMARY_COL + 4, min_row=rows[0], max_row=rows[-1])
             y_values = Reference(sheet, min_col=SUMMARY_COL + 3, min_row=rows[0], max_row=rows[-1])
             series = Series(y_values, x_values, title_from_data=False)
-            series.title = SeriesLabel(v=layout.block.label)
+            series.title = SeriesLabel(v=archive.effective_label(layout.block))
             line = series_line[series_index % len(series_line)]
             marker = series_marker[series_index % len(series_marker)]
             series.graphicalProperties = GraphicalProperties(ln=LineProperties(solidFill=line, w=22225))

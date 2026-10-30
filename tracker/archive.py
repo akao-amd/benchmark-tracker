@@ -259,6 +259,7 @@ class Block:
     retired: bool = False
     retired_at: str = ""
     added_at: str = ""
+    namespace_id: str = ""
 
     def __post_init__(self):
         self.ensure_attributes()
@@ -299,6 +300,7 @@ class Block:
             "retired": self.retired,
             "retired_at": self.retired_at,
             "added_at": self.added_at,
+            "namespace_id": self.namespace_id,
             "points": [point.to_dict() for point in self.points],
         }
 
@@ -358,6 +360,7 @@ class Block:
             retired=bool(raw.get("retired")),
             retired_at=_text(raw.get("retired_at", ""), f"{where} retired_at"),
             added_at=_text(raw.get("added_at", ""), f"{where} added_at"),
+            namespace_id=_text(raw.get("namespace_id", ""), f"{where} namespace_id").strip(),
         )
         if not block.id:
             raise ArchiveError(f"{where}: id is empty")
@@ -400,10 +403,37 @@ def _prefer_incoming(choice: str, incoming: Point, incoming_gpus: float, current
 
 
 @dataclass
+class Namespace:
+    id: str
+    name: str
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "name": self.name}
+
+
+def _load_namespaces(raw: dict) -> list[Namespace]:
+    loaded = []
+    for index, item in enumerate(raw.get("namespaces") or [], start=1):
+        if not isinstance(item, dict):
+            raise ArchiveError(f"namespace {index} must be an object")
+        name = _text(item.get("name"), f"namespace {index} name").strip()
+        ident = _text(item.get("id") or uuid.uuid4().hex[:12], f"namespace {index} id").strip()
+        if not name or not ident:
+            raise ArchiveError(f"namespace {index} needs a name")
+        loaded.append(Namespace(id=ident, name=name))
+    if len({item.id for item in loaded}) != len(loaded):
+        raise ArchiveError("two namespaces share an id")
+    if len({item.name for item in loaded}) != len(loaded):
+        raise ArchiveError("two namespaces share a name")
+    return loaded
+
+
+@dataclass
 class Archive:
     model: str = ""
     blocks: list[Block] = field(default_factory=list)
     notices: list[dict] = field(default_factory=list)
+    namespaces: list[Namespace] = field(default_factory=list)
 
     def dumps(self) -> str:
         payload = {
@@ -411,9 +441,41 @@ class Archive:
             "version": VERSION,
             "model": self.model,
             "notices": self.notices[-200:],
+            "namespaces": [item.to_dict() for item in self.namespaces],
             "blocks": [block.to_dict() for block in self.blocks],
         }
         return json.dumps(payload, indent=2) + "\n"
+
+    def _namespace(self, namespace_id: str) -> Namespace:
+        for item in self.namespaces:
+            if item.id == namespace_id:
+                return item
+        raise ArchiveError("no namespace")
+
+    def _namespace_name(self, namespace_id: str) -> str:
+        if not namespace_id:
+            return ""
+        for item in self.namespaces:
+            if item.id == namespace_id:
+                return item.name
+        return ""
+
+    def _join(self, namespace_id: str, label: str) -> str:
+        name = self._namespace_name(namespace_id)
+        if not name:
+            return label
+        return f"{name}_{label}"
+
+    def effective_label(self, block: Block) -> str:
+        """Name used on the sheet, the figure, and a retired block."""
+        return self._join(block.namespace_id, block.label)
+
+    def _name_taken(self, ignore_id: str, namespace_id: str, label: str) -> bool:
+        trial = self._join(namespace_id, label)
+        return any(
+            other.id != ignore_id and not other.retired and self.effective_label(other) == trial
+            for other in self.blocks
+        )
 
     @classmethod
     def load(cls, text: str) -> "Archive":
@@ -430,7 +492,17 @@ class Archive:
         ids = [block.id for block in blocks]
         if len(ids) != len(set(ids)):
             raise ArchiveError("two blocks share an id")
-        active_labels = [block.label for block in blocks if not block.retired]
+        namespaces = _load_namespaces(raw)
+        known_namespaces = {item.id: item for item in namespaces}
+        for block in blocks:
+            if block.namespace_id and block.namespace_id not in known_namespaces:
+                block.namespace_id = ""
+        active_labels = []
+        for block in blocks:
+            if block.retired:
+                continue
+            ns = known_namespaces.get(block.namespace_id)
+            active_labels.append(f"{ns.name}_{block.label}" if ns else block.label)
         if len(active_labels) != len(set(active_labels)):
             raise ArchiveError("two blocks share a label")
         known = {block.id: block for block in blocks}
@@ -447,7 +519,12 @@ class Archive:
             if isinstance(item, dict) and isinstance(item.get("message"), str):
                 kind = item.get("kind") if item.get("kind") in ("skip", "note") else "skip"
                 notices.append({"path": _text(item.get("path", ""), "notice path"), "message": item["message"], "kind": kind})
-        return cls(model=_text(raw.get("model", ""), "model"), blocks=blocks, notices=notices[-200:])
+        return cls(
+            model=_text(raw.get("model", ""), "model"),
+            blocks=blocks,
+            notices=notices[-200:],
+            namespaces=namespaces,
+        )
 
     def block(self, block_id: str) -> Block:
         for block in self.blocks:
@@ -463,7 +540,7 @@ class Archive:
 
     def apply_scan(self, blocks: list[Block], notices: list[dict], resolutions: dict | None, model_hint: str) -> None:
         """Add scanned blocks, or raise Conflict before changing anything."""
-        existing = {block.label: block for block in self.blocks if not block.retired}
+        existing = {self.effective_label(block): block for block in self.blocks if not block.retired}
         taken = set(existing)
         incoming = {block.label: block for block in blocks}
         if len(incoming) != len(blocks):
@@ -628,8 +705,8 @@ class Archive:
             label = _text(fields["label"], "label").strip()
             if not label:
                 raise ArchiveError("label is empty")
-            if any(other.label == label and other.id != block.id and not other.retired and not block.retired for other in self.blocks):
-                raise ArchiveError(f"{label} is already used")
+            if not block.retired and self._name_taken(block.id, block.namespace_id, label):
+                raise ArchiveError(f"{self._join(block.namespace_id, label)} is already used")
             block.label = label
         if "gpus" in fields:
             gpus = _float(fields["gpus"], "gpus")
@@ -689,11 +766,8 @@ class Archive:
         if "retired" in fields:
             turning_on = bool(fields["retired"]) and not block.retired
             turning_off = not bool(fields["retired"]) and block.retired
-            if turning_off and any(
-                other.label == block.label and other.id != block.id and not other.retired
-                for other in self.blocks
-            ):
-                raise ArchiveError(f"{block.label} is already in use. Retire that block first.")
+            if turning_off and self._name_taken(block.id, block.namespace_id, block.label):
+                raise ArchiveError(f"{self.effective_label(block)} is already in use. Retire that block first.")
             block.retired = bool(fields["retired"])
             if turning_on:
                 block.retired_at = stamp()
@@ -707,6 +781,72 @@ class Archive:
                 block.retired_at = ""
         if block.baseline:
             block.baseline_id = None
+
+    def add_namespace(self, name: str) -> Namespace:
+        name = _text(name, "name").strip()
+        if not name:
+            raise ArchiveError("a namespace needs a name")
+        if any(item.name == name for item in self.namespaces):
+            raise ArchiveError(f"{name} is already a namespace")
+        item = Namespace(id=uuid.uuid4().hex[:12], name=name)
+        self.namespaces.append(item)
+        return item
+
+    def rename_namespace(self, namespace_id: str, name: str) -> None:
+        name = _text(name, "name").strip()
+        if not name:
+            raise ArchiveError("a namespace needs a name")
+        item = self._namespace(namespace_id)
+        if any(other.name == name and other.id != item.id for other in self.namespaces):
+            raise ArchiveError(f"{name} is already a namespace")
+        previous = item.name
+        item.name = name
+        active = [self.effective_label(block) for block in self.blocks if not block.retired]
+        if len(active) != len(set(active)):
+            item.name = previous
+            raise ArchiveError(f"{name} collides with a block")
+
+    def remove_namespace(self, namespace_id: str) -> None:
+        self._namespace(namespace_id)
+        for block in self.blocks:
+            if block.namespace_id != namespace_id:
+                continue
+            block.label = self.effective_label(block)
+            block.namespace_id = ""
+        self.namespaces = [item for item in self.namespaces if item.id != namespace_id]
+
+    def place(self, block_id: str, namespace_id: str) -> None:
+        """Move a block into a namespace, or back onto the board when namespace_id is empty."""
+        block = self.block(block_id)
+        if not namespace_id:
+            if not block.namespace_id:
+                return
+            block.label = self.effective_label(block)
+            block.namespace_id = ""
+            return
+        item = self._namespace(namespace_id)
+        label = self.effective_label(block) if block.namespace_id and block.namespace_id != item.id else block.label
+        prefix = item.name + "_"
+        if label.startswith(prefix):
+            label = label[len(prefix):]
+        if not label:
+            raise ArchiveError("the name inside the namespace would be empty")
+        if not block.retired and self._name_taken(block.id, item.id, label):
+            raise ArchiveError(f"{item.name}_{label} is already used")
+        block.label = label
+        block.namespace_id = item.id
+        self._cluster(block)
+
+    def _cluster(self, block: Block) -> None:
+        siblings = [
+            other for other in self.blocks
+            if other.namespace_id == block.namespace_id and other.id != block.id
+        ]
+        self.blocks = [other for other in self.blocks if other.id != block.id]
+        if not siblings:
+            self.blocks.append(block)
+            return
+        self.blocks.insert(self.blocks.index(siblings[-1]) + 1, block)
 
     def delete(self, block_id: str) -> None:
         block = self.block(block_id)
@@ -748,6 +888,7 @@ class Archive:
             "model": self.model,
             "path": path,
             "notices": list(self.notices),
+            "namespaces": [item.to_dict() for item in self.namespaces],
             "blocks": blocks,
             "figures": self._figures(by_id),
         }
@@ -830,9 +971,11 @@ class Archive:
         return {
             "id": block.id,
             "label": block.label,
+            "namespace_id": block.namespace_id,
+            "effective_label": self.effective_label(block),
             "baseline": block.baseline,
             "baseline_id": block.baseline_id,
-            "baseline_label": baseline.label if baseline is not None else "",
+            "baseline_label": self.effective_label(baseline) if baseline is not None else "",
             "chart": block.chart,
             "gpus": _json_number(block.gpus),
             "active_run": block.active_run,
@@ -869,7 +1012,7 @@ class Archive:
                     continue
                 concs.extend(point.concurrency for point in points)
                 series.append({
-                    "label": block.label,
+                    "label": self.effective_label(block),
                     "color": index,
                     "points": [
                         {

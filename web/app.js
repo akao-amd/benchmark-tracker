@@ -96,7 +96,7 @@ function matches(block) {
   const query = queryText();
   if (!query) return true;
   const filled = block.attributes.filter((item) => String(item.value || "").trim());
-  const hay = [block.label].concat(filled.flatMap((item) => [item.key, item.value])).join("\n").toLowerCase();
+  const hay = [block.label, block.effective_label].concat(filled.flatMap((item) => [item.key, item.value])).join("\n").toLowerCase();
   return hay.includes(query);
 }
 
@@ -348,20 +348,19 @@ function renderBoard() {
   }
   const current = shown.filter((block) => !block.retired);
   const retired = shown.filter((block) => block.retired);
-  if (!current.length && !retired.length) {
+  const namespaces = state.workspace.namespaces || [];
+  if (!current.length && !retired.length && !namespaces.length) {
     board.append(h("p", { class: "empty", text: query
       ? "Nothing matches."
       : "Drag a results directory here. Drop it on a block to add the files to that block. The name in the file is not the block." }));
     return;
   }
-  if (!current.length) {
+  if (!current.length && !namespaces.length) {
     board.append(h("p", { class: "empty", text: query
       ? "Nothing current matches."
       : "Drag a results directory here. A retired block keeps its label free for the next set." }));
   } else {
-    const cards = h("div", { class: "cards" });
-    current.forEach((block) => cards.append(card(block)));
-    board.append(cards);
+    board.append(renderCurrent(current));
   }
   if (retired.length) {
     board.append(h("p", { class: "retired-head", text: "Retired" }));
@@ -386,6 +385,116 @@ function timeLine(block) {
   return parts.join(" · ");
 }
 
+function realName(block) {
+  return block.effective_label || block.label;
+}
+
+function faceName(block) {
+  return block.retired ? realName(block) : block.label;
+}
+
+function renderCurrent(current) {
+  const namespaces = state.workspace.namespaces || [];
+  const known = new Map(namespaces.map((item) => [item.id, item]));
+  const members = new Map(namespaces.map((item) => [item.id, []]));
+  current.forEach((block) => {
+    if (block.namespace_id && members.has(block.namespace_id)) members.get(block.namespace_id).push(block);
+  });
+  const items = [];
+  const opened = new Set();
+  current.forEach((block) => {
+    if (block.namespace_id && known.has(block.namespace_id)) {
+      if (opened.has(block.namespace_id)) return;
+      opened.add(block.namespace_id);
+      items.push({ kind: "namespace", namespace: known.get(block.namespace_id), blocks: members.get(block.namespace_id) });
+      return;
+    }
+    items.push({ kind: "card", block });
+  });
+  const query = queryText();
+  namespaces.forEach((item) => {
+    if (opened.has(item.id)) return;
+    if (query && !item.name.toLowerCase().includes(query)) return;
+    items.push({ kind: "namespace", namespace: item, blocks: [] });
+  });
+  const flow = h("div", { class: "flow" });
+  let grid = null;
+  items.forEach((item) => {
+    if (item.kind === "card") {
+      if (!grid) {
+        grid = h("div", { class: "cards" });
+        flow.append(grid);
+      }
+      grid.append(card(item.block));
+      return;
+    }
+    grid = null;
+    flow.append(namespaceBox(item.namespace, item.blocks));
+  });
+  return flow;
+}
+
+async function assignNamespace(blockId, namespaceId) {
+  const block = blockById(blockId);
+  if (block && (block.namespace_id || "") === (namespaceId || "")) return;
+  showError("");
+  try {
+    setWorkspace(await act({ action: "namespace", op: "place", id: blockId, namespace: namespaceId || "" }), true);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function namespaceBox(namespace, blocks) {
+  const box = h("section", { class: "namespace", "data-namespace": namespace.id });
+  const title = h("button", { type: "button", class: "name", text: namespace.name, title: "Rename" });
+  title.addEventListener("click", async () => {
+    const next = window.prompt("Namespace name", namespace.name);
+    if (next == null) return;
+    const name = next.trim();
+    if (!name || name === namespace.name) return;
+    showError("");
+    try {
+      setWorkspace(await act({ action: "namespace", op: "rename", namespace: namespace.id, name }), false);
+    } catch (error) { showError(error); }
+  });
+  const remove = h("button", { type: "button", class: "quiet", text: "×", title: "Remove namespace" });
+  remove.addEventListener("click", async () => {
+    const question = blocks.length
+      ? "Take the blocks out of " + namespace.name + "? Their names on the sheet stay the same."
+      : "Remove " + namespace.name + "?";
+    if (!window.confirm(question)) return;
+    showError("");
+    try {
+      setWorkspace(await act({ action: "namespace", op: "remove", namespace: namespace.id }), true);
+    } catch (error) { showError(error); }
+  });
+  box.append(h("div", { class: "bar" }, [title, remove]));
+  if (!blocks.length) box.append(h("p", { class: "slot", text: "Drag a block here." }));
+  else {
+    const grid = h("div", { class: "cards" });
+    blocks.forEach((block) => grid.append(card(block)));
+    box.append(grid);
+  }
+  box.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    box.classList.add("drop");
+  });
+  box.addEventListener("dragleave", (event) => {
+    if (!box.contains(event.relatedTarget)) box.classList.remove("drop");
+  });
+  box.addEventListener("drop", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    box.classList.remove("drop");
+    document.getElementById("board").classList.remove("drop");
+    const payload = event.dataTransfer.getData("text/plain");
+    if (payload && payload.startsWith("block:")) assignNamespace(payload.slice(6), namespace.id);
+  });
+  return box;
+}
+
 function card(block) {
   const shapes = (block.shapes || []).filter((shape) => shape.included);
   const bits = ["÷ " + block.gpus];
@@ -401,7 +510,7 @@ function card(block) {
     class: "card" + (block.retired ? " retired" : "") + (state.selected === block.id ? " on" : ""),
     "data-id": block.id,
   });
-  node.append(h("header", { text: block.label }));
+  node.append(h("header", { text: faceName(block) }));
   const when = timeLine(block);
   if (when) node.append(h("p", { class: "when", text: when }));
   node.append(h("p", { text: bits.join(" · ") }));
@@ -529,7 +638,7 @@ function placeMenu(menu, x, y) {
 
 async function retireBlock(block) {
   const retiring = !block.retired;
-  if (retiring && !window.confirm("Retire " + block.label + "? It stays in the file, off the sheet, and this label can be imported again.")) return;
+  if (retiring && !window.confirm("Retire " + realName(block) + "? It stays in the file, off the sheet, and this label can be imported again.")) return;
   try {
     setWorkspace(await act({ action: "patch", id: block.id, retired: retiring }), true);
     showStatus(retiring ? "Retired " + block.label + "." : "Restored " + block.label + ".");
@@ -559,7 +668,7 @@ function hideHover() {
 }
 
 function renderFigures(board, blocks) {
-  const wanted = new Set(blocks.filter((block) => !block.retired).map((block) => block.label));
+  const wanted = new Set(blocks.filter((block) => !block.retired).map((block) => realName(block)));
   const figures = (state.workspace.figures || []).map((figure) => ({
     ...figure,
     series: figure.series.filter((series) => wanted.has(series.label)),
@@ -620,7 +729,7 @@ async function copyFigure(svg) {
 }
 
 async function hideSeries(label) {
-  const block = (state.workspace.blocks || []).find((item) => item.label === label && !item.retired);
+  const block = (state.workspace.blocks || []).find((item) => realName(item) === label && !item.retired);
   if (!block) return;
   showError("");
   try {
@@ -763,6 +872,9 @@ function renderEditor() {
   aside.append(field("Label", h("input", { id: "f-label", value: block.label, spellcheck: "false" }), (input) => {
     input.addEventListener("change", () => patch({ label: input.value }, false));
   }));
+  if (block.namespace_id && realName(block) !== block.label) {
+    aside.append(h("p", { class: "hint", text: "On the sheet and the figure this is " + realName(block) + "." }));
+  }
   historyOf(block, aside);
   const gpus = h("input", { id: "f-gpus", type: "number", min: "0", step: "any", value: block.gpus });
   aside.append(field("GPUs, the divisor", gpus, (input) => {
@@ -796,7 +908,7 @@ function renderEditor() {
     const select = h("select");
     select.append(h("option", { value: "", text: "No baseline" }));
     (state.workspace.blocks || []).filter((item) => item.baseline && !item.retired && item.id !== block.id).forEach((item) => {
-      select.append(h("option", { value: item.id, text: item.label, selected: item.id === block.baseline_id ? "selected" : null }));
+      select.append(h("option", { value: item.id, text: realName(item), selected: item.id === block.baseline_id ? "selected" : null }));
     });
     select.addEventListener("change", () => patch({ baseline_id: select.value || null }, true));
     aside.append(field("Ratio against", select));
@@ -859,7 +971,7 @@ function renderEditor() {
   const others = (state.workspace.blocks || []).filter((item) => item.id !== block.id);
   if (others.length) {
     const select = h("select");
-    others.forEach((item) => select.append(h("option", { value: item.id, text: item.label })));
+    others.forEach((item) => select.append(h("option", { value: item.id, text: realName(item) })));
     const moveInto = h("button", { type: "button", text: "Move measurements into" });
     moveInto.addEventListener("click", () => mergeBlocks(block.id, select.value));
     aside.append(h("div", { class: "attr-actions" }, [moveInto, select]));
@@ -885,7 +997,7 @@ function renderEditor() {
 }
 
 function historyOf(block, aside) {
-  const kin = (state.workspace.blocks || []).filter((item) => item.label === block.label);
+  const kin = (state.workspace.blocks || []).filter((item) => realName(item) === realName(block));
   if (kin.length < 2) return;
   aside.append(h("h2", { text: "History" }));
   const list = h("div", { class: "history" });
@@ -1072,6 +1184,18 @@ function wire() {
     try { setWorkspace(await act({ action: "model", model: event.target.value }), false); } catch (error) { showError(error); }
   });
   document.getElementById("search-toggle").addEventListener("click", () => toggleSearch(true));
+  document.getElementById("namespace").addEventListener("click", async () => {
+    const entered = window.prompt("Namespace name");
+    if (entered == null) return;
+    const name = entered.trim();
+    if (!name) {
+      showError("A namespace needs a name.");
+      return;
+    }
+    showError("");
+    try { setWorkspace(await act({ action: "namespace", op: "add", name }), false); }
+    catch (error) { showError(error); }
+  });
   document.getElementById("search").addEventListener("input", (event) => {
     state.query = event.target.value;
     renderBoard();
@@ -1094,7 +1218,8 @@ function wire() {
     event.preventDefault();
     board.classList.remove("drop");
     const path = event.dataTransfer.getData("text/plain");
-    if (path && !path.startsWith("block:")) ingest(path);
+    if (path && path.startsWith("block:")) assignNamespace(path.slice(6), "");
+    else if (path) ingest(path);
   });
   document.getElementById("collision-cancel").addEventListener("click", () => {
     document.getElementById("modal").hidden = true;

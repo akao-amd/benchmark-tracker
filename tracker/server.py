@@ -74,6 +74,7 @@ class App:
                 archive.model = loaded.model
                 archive.blocks = loaded.blocks
                 archive.notices = loaded.notices
+                archive.namespaces = loaded.namespaces
 
             self.workspace.mutate(change)
             return self.view()
@@ -83,6 +84,19 @@ class App:
                 archive.model = ""
                 archive.blocks = []
                 archive.notices = []
+                archive.namespaces = []
+            elif action == "namespace":
+                op = str(body.get("op") or "")
+                if op == "add":
+                    archive.add_namespace(str(body.get("name") or ""))
+                elif op == "rename":
+                    archive.rename_namespace(str(body.get("namespace") or ""), str(body.get("name") or ""))
+                elif op == "remove":
+                    archive.remove_namespace(str(body.get("namespace") or ""))
+                elif op == "place":
+                    archive.place(str(body.get("id") or ""), str(body.get("namespace") or ""))
+                else:
+                    raise ArchiveError(f"unknown namespace action {op}")
             elif action == "model":
                 archive.model = str(body.get("model") or "")
             elif action == "clear_notices":
