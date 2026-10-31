@@ -55,6 +55,7 @@ h2 { margin: 0 0 8px; font-size: 15px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
 .namespace { background: rgba(80, 80, 80, 0.06); border: 1px solid rgba(80, 80, 80, 0.08); border-radius: 8px; padding: 8px 10px 12px; }
 .namespace.drop { outline: 2px dashed #1c1c1c; outline-offset: -4px; }
+.namespace.aim { outline: 2px solid #888; outline-offset: -4px; }
 .namespace .bar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: grab; }
 .namespace .bar:active { cursor: grabbing; }
 .namespace .grip { color: #aaa; letter-spacing: -1px; user-select: none; }

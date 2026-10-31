@@ -442,40 +442,16 @@ function renderCurrent(current) {
   return flow;
 }
 
-function restoreNamespaceOrderFrom(drag) {
-  if (!drag.flow || !drag.order) return;
-  drag.order.forEach((node) => drag.flow.append(node));
-}
-
-function rememberNamespaceOrder() {
-  const flow = document.querySelector("#board .flow");
-  if (!flow || !state.namespaceDrag) return;
-  state.namespaceDrag.flow = flow;
-  state.namespaceDrag.order = [...flow.children];
-}
-
-function restoreNamespaceOrder() {
-  const drag = state.namespaceDrag;
-  if (!drag || !drag.flow || !drag.order) return;
-  drag.order.forEach((node) => drag.flow.append(node));
-}
-
-function previewNamespaceSwap(targetId) {
-  const drag = state.namespaceDrag;
-  if (!drag) return;
-  restoreNamespaceOrder();
-  if (!targetId || targetId === drag.id) return;
-  const source = drag.flow.querySelector('[data-namespace="' + drag.id + '"]');
-  const target = drag.flow.querySelector('[data-namespace="' + targetId + '"]');
-  if (!source || !target) return;
-  const sourceNext = source.nextSibling;
-  const targetNext = target.nextSibling;
-  if (sourceNext === target) drag.flow.insertBefore(target, source);
-  else if (targetNext === source) drag.flow.insertBefore(source, target);
-  else {
-    drag.flow.insertBefore(source, targetNext);
-    drag.flow.insertBefore(target, sourceNext);
+function markNamespaceTarget(id) {
+  document.querySelectorAll(".namespace.aim").forEach((node) => node.classList.remove("aim"));
+  if (!state.namespaceDrag) return;
+  if (!id || id === state.namespaceDrag.id) {
+    state.namespaceDrag.over = "";
+    return;
   }
+  state.namespaceDrag.over = id;
+  const node = document.querySelector('[data-namespace="' + id + '"]');
+  if (node) node.classList.add("aim");
 }
 
 async function swapNamespaces(sourceId, targetId) {
@@ -537,12 +513,10 @@ function namespaceBox(namespace, blocks) {
     event.dataTransfer.effectAllowed = "move";
     if (event.dataTransfer.setDragImage) event.dataTransfer.setDragImage(box, 24, 20);
     state.namespaceDrag = { id: namespace.id, over: "", committed: false };
-    rememberNamespaceOrder();
   });
   bar.addEventListener("dragend", () => {
-    const drag = state.namespaceDrag;
     state.namespaceDrag = null;
-    if (drag && !drag.committed) restoreNamespaceOrderFrom(drag);
+    document.querySelectorAll(".namespace.aim").forEach((node) => node.classList.remove("aim"));
   });
   box.append(bar);
   if (!blocks.length) box.append(h("p", { class: "slot", text: "Drag a block here." }));
@@ -555,10 +529,7 @@ function namespaceBox(namespace, blocks) {
     if (state.namespaceDrag) {
       event.preventDefault();
       event.stopPropagation();
-      if (state.namespaceDrag.over !== namespace.id) {
-        state.namespaceDrag.over = namespace.id;
-        previewNamespaceSwap(namespace.id);
-      }
+      if (state.namespaceDrag.over !== namespace.id) markNamespaceTarget(namespace.id);
       return;
     }
     event.preventDefault();
@@ -566,7 +537,9 @@ function namespaceBox(namespace, blocks) {
     box.classList.add("drop");
   });
   box.addEventListener("dragleave", (event) => {
-    if (!box.contains(event.relatedTarget)) box.classList.remove("drop");
+    if (box.contains(event.relatedTarget)) return;
+    box.classList.remove("drop");
+    if (state.namespaceDrag && state.namespaceDrag.over === namespace.id) markNamespaceTarget("");
   });
   box.addEventListener("drop", (event) => {
     event.preventDefault();
@@ -625,12 +598,12 @@ function card(block) {
     if (!node.contains(event.relatedTarget)) node.classList.remove("drop");
   });
   node.addEventListener("drop", (event) => {
+    const payload = event.dataTransfer.getData("text/plain");
+    if (payload.startsWith("namespace:")) return;
     event.preventDefault();
     event.stopPropagation();
     node.classList.remove("drop");
     document.getElementById("board").classList.remove("drop");
-    const payload = event.dataTransfer.getData("text/plain");
-    if (payload.startsWith("namespace:")) return;
     if (!payload || payload === "block:" + block.id) return;
     if (payload.startsWith("block:")) mergeBlocks(payload.slice(6), block.id);
     else ingestInto(payload, block.id);
