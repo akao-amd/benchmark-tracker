@@ -11,7 +11,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from tracker.archive import Archive, ArchiveError, geomean
+from tracker.archive import Archive, ArchiveError, Block, geomean
 from tracker.bench import parse_name
 from tracker.excel_push import describe, place_request
 from tracker.export_xlsx import append_workbook, workbook_bytes
@@ -261,6 +261,29 @@ class ModelTest(unittest.TestCase):
             archive.place(by["TP2"].id, "")
             self.assertEqual(by["TP2"].label, "MI450_MC_HAMMER_B0_TP2")
             self.assertEqual(by["TP2"].namespace_id, "")
+
+    def test_swapping_namespaces_trades_their_places(self):
+        archive = Archive(blocks=[
+            Block(id="loose", label="loose"),
+            Block(id="a1", label="A1"),
+            Block(id="b1", label="B1"),
+        ])
+        archive.add_namespace("A")
+        archive.add_namespace("B")
+        archive.add_namespace("E")
+        names = {item.name: item for item in archive.namespaces}
+        archive.blocks[1].namespace_id = names["A"].id
+        archive.blocks[2].namespace_id = names["B"].id
+        archive.swap_namespaces(names["A"].id, names["B"].id)
+        self.assertEqual([block.label for block in archive.blocks], ["loose", "B1", "A1"])
+        archive.swap_namespaces(names["A"].id, names["E"].id)
+        self.assertEqual([block.label for block in archive.blocks], ["loose", "B1", "A1"])
+        self.assertEqual(names["E"].before_block, "a1")
+        loaded = Archive.load(archive.dumps())
+        self.assertEqual([item.name for item in loaded.namespaces], ["B", "E", "A"])
+        empty = next(item for item in loaded.namespaces if item.name == "E")
+        self.assertEqual(empty.before_block, "a1")
+        self.assertEqual([block.label for block in loaded.blocks], ["loose", "B1", "A1"])
 
     def test_shared_baseline_file_becomes_a_choice_on_each_block(self):
         with tempfile.TemporaryDirectory() as tmp:

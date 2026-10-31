@@ -16,6 +16,7 @@ const state = {
   pendingMerge: null,
   filesFolded: false,
   boardFolded: false,
+  namespaceDrag: null,
 };
 
 function h(tag, props, kids) {
@@ -402,7 +403,14 @@ function renderCurrent(current) {
   });
   const items = [];
   const opened = new Set();
+  function emptiesBefore(blockId) {
+    return namespaces.filter((item) => !(members.get(item.id) || []).length && item.before_block === blockId && !opened.has(item.id));
+  }
   current.forEach((block) => {
+    emptiesBefore(block.id).forEach((item) => {
+      opened.add(item.id);
+      items.push({ kind: "namespace", namespace: item, blocks: [] });
+    });
     if (block.namespace_id && known.has(block.namespace_id)) {
       if (opened.has(block.namespace_id)) return;
       opened.add(block.namespace_id);
@@ -414,8 +422,8 @@ function renderCurrent(current) {
   const query = queryText();
   namespaces.forEach((item) => {
     if (opened.has(item.id)) return;
-    if (query && !item.name.toLowerCase().includes(query)) return;
-    items.push({ kind: "namespace", namespace: item, blocks: [] });
+    if (query && !item.name.toLowerCase().includes(query) && !(members.get(item.id) || []).length) return;
+    items.push({ kind: "namespace", namespace: item, blocks: members.get(item.id) || [] });
   });
   const flow = h("div", { class: "flow" });
   let grid = null;
@@ -432,6 +440,53 @@ function renderCurrent(current) {
     flow.append(namespaceBox(item.namespace, item.blocks));
   });
   return flow;
+}
+
+function restoreNamespaceOrderFrom(drag) {
+  if (!drag.flow || !drag.order) return;
+  drag.order.forEach((node) => drag.flow.append(node));
+}
+
+function rememberNamespaceOrder() {
+  const flow = document.querySelector("#board .flow");
+  if (!flow || !state.namespaceDrag) return;
+  state.namespaceDrag.flow = flow;
+  state.namespaceDrag.order = [...flow.children];
+}
+
+function restoreNamespaceOrder() {
+  const drag = state.namespaceDrag;
+  if (!drag || !drag.flow || !drag.order) return;
+  drag.order.forEach((node) => drag.flow.append(node));
+}
+
+function previewNamespaceSwap(targetId) {
+  const drag = state.namespaceDrag;
+  if (!drag) return;
+  restoreNamespaceOrder();
+  if (!targetId || targetId === drag.id) return;
+  const source = drag.flow.querySelector('[data-namespace="' + drag.id + '"]');
+  const target = drag.flow.querySelector('[data-namespace="' + targetId + '"]');
+  if (!source || !target) return;
+  const sourceNext = source.nextSibling;
+  const targetNext = target.nextSibling;
+  if (sourceNext === target) drag.flow.insertBefore(target, source);
+  else if (targetNext === source) drag.flow.insertBefore(source, target);
+  else {
+    drag.flow.insertBefore(source, targetNext);
+    drag.flow.insertBefore(target, sourceNext);
+  }
+}
+
+async function swapNamespaces(sourceId, targetId) {
+  if (!sourceId || sourceId === targetId) return;
+  showError("");
+  try {
+    setWorkspace(await act({ action: "namespace", op: "swap", namespace: sourceId, target: targetId }), false);
+  } catch (error) {
+    showError(error);
+    renderBoard();
+  }
 }
 
 async function assignNamespace(blockId, namespaceId) {
@@ -469,7 +524,27 @@ function namespaceBox(namespace, blocks) {
       setWorkspace(await act({ action: "namespace", op: "remove", namespace: namespace.id }), true);
     } catch (error) { showError(error); }
   });
-  box.append(h("div", { class: "bar" }, [title, remove]));
+  const grip = h("span", { class: "grip", text: "⋮⋮", title: "Drag to rearrange" });
+  const bar = h("div", { class: "bar" }, [grip, title, remove]);
+  bar.setAttribute("draggable", "true");
+  bar.addEventListener("dragstart", (event) => {
+    if (event.target.closest && event.target.closest("button")) {
+      event.preventDefault();
+      return;
+    }
+    event.stopPropagation();
+    event.dataTransfer.setData("text/plain", "namespace:" + namespace.id);
+    event.dataTransfer.effectAllowed = "move";
+    if (event.dataTransfer.setDragImage) event.dataTransfer.setDragImage(box, 24, 20);
+    state.namespaceDrag = { id: namespace.id, over: "", committed: false };
+    rememberNamespaceOrder();
+  });
+  bar.addEventListener("dragend", () => {
+    const drag = state.namespaceDrag;
+    state.namespaceDrag = null;
+    if (drag && !drag.committed) restoreNamespaceOrderFrom(drag);
+  });
+  box.append(bar);
   if (!blocks.length) box.append(h("p", { class: "slot", text: "Drag a block here." }));
   else {
     const grid = h("div", { class: "cards" });
@@ -477,6 +552,15 @@ function namespaceBox(namespace, blocks) {
     box.append(grid);
   }
   box.addEventListener("dragover", (event) => {
+    if (state.namespaceDrag) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (state.namespaceDrag.over !== namespace.id) {
+        state.namespaceDrag.over = namespace.id;
+        previewNamespaceSwap(namespace.id);
+      }
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     box.classList.add("drop");
@@ -490,6 +574,12 @@ function namespaceBox(namespace, blocks) {
     box.classList.remove("drop");
     document.getElementById("board").classList.remove("drop");
     const payload = event.dataTransfer.getData("text/plain");
+    if (payload && payload.startsWith("namespace:")) {
+      const source = payload.slice("namespace:".length);
+      if (state.namespaceDrag) state.namespaceDrag.committed = true;
+      if (source && source !== namespace.id) swapNamespaces(source, namespace.id);
+      return;
+    }
     if (payload && payload.startsWith("block:")) assignNamespace(payload.slice(6), namespace.id);
   });
   return box;
@@ -523,6 +613,10 @@ function card(block) {
     event.stopPropagation();
   });
   node.addEventListener("dragover", (event) => {
+    if (state.namespaceDrag) {
+      event.preventDefault();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     node.classList.add("drop");
@@ -536,6 +630,7 @@ function card(block) {
     node.classList.remove("drop");
     document.getElementById("board").classList.remove("drop");
     const payload = event.dataTransfer.getData("text/plain");
+    if (payload.startsWith("namespace:")) return;
     if (!payload || payload === "block:" + block.id) return;
     if (payload.startsWith("block:")) mergeBlocks(payload.slice(6), block.id);
     else ingestInto(payload, block.id);
@@ -1212,12 +1307,17 @@ function wire() {
   });
   applyFolds();
   const board = document.getElementById("board");
-  board.addEventListener("dragover", (event) => { event.preventDefault(); board.classList.add("drop"); });
+  board.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (state.namespaceDrag) return;
+    board.classList.add("drop");
+  });
   board.addEventListener("dragleave", () => board.classList.remove("drop"));
   board.addEventListener("drop", (event) => {
     event.preventDefault();
     board.classList.remove("drop");
     const path = event.dataTransfer.getData("text/plain");
+    if (path && path.startsWith("namespace:")) return;
     if (path && path.startsWith("block:")) assignNamespace(path.slice(6), "");
     else if (path) ingest(path);
   });

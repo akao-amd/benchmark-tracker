@@ -406,9 +406,10 @@ def _prefer_incoming(choice: str, incoming: Point, incoming_gpus: float, current
 class Namespace:
     id: str
     name: str
+    before_block: str = ""
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "name": self.name}
+        return {"id": self.id, "name": self.name, "before_block": self.before_block}
 
 
 def _load_namespaces(raw: dict) -> list[Namespace]:
@@ -420,7 +421,8 @@ def _load_namespaces(raw: dict) -> list[Namespace]:
         ident = _text(item.get("id") or uuid.uuid4().hex[:12], f"namespace {index} id").strip()
         if not name or not ident:
             raise ArchiveError(f"namespace {index} needs a name")
-        loaded.append(Namespace(id=ident, name=name))
+        before = _text(item.get("before_block", ""), f"namespace {index} before_block").strip()
+        loaded.append(Namespace(id=ident, name=name, before_block=before))
     if len({item.id for item in loaded}) != len(loaded):
         raise ArchiveError("two namespaces share an id")
     if len({item.name for item in loaded}) != len(loaded):
@@ -847,6 +849,77 @@ class Archive:
             self.blocks.append(block)
             return
         self.blocks.insert(self.blocks.index(siblings[-1]) + 1, block)
+
+    def swap_namespaces(self, source_id: str, target_id: str) -> None:
+        """Trade two groups on the board. Blocks inside them stay put, and nothing merges."""
+        if source_id == target_id:
+            return
+        self._namespace(source_id)
+        self._namespace(target_id)
+        retired = [block for block in self.blocks if block.retired]
+        current = [block for block in self.blocks if not block.retired]
+        items = self._flow_items(current)
+        source_at = next(index for index, item in enumerate(items) if item[0] == "ns" and item[1].id == source_id)
+        target_at = next(index for index, item in enumerate(items) if item[0] == "ns" and item[1].id == target_id)
+        items[source_at], items[target_at] = items[target_at], items[source_at]
+        self.blocks = self._flatten_flow(items) + retired
+        self.namespaces = [item[1] for item in items if item[0] == "ns"]
+        self._assign_empty_slots(items)
+
+    def _flow_items(self, current: list[Block]) -> list[tuple]:
+        known = {item.id: item for item in self.namespaces}
+        members = {item.id: [] for item in self.namespaces}
+        for block in current:
+            if block.namespace_id in members:
+                members[block.namespace_id].append(block)
+        items = []
+        opened = set()
+
+        def empties_before(block_id: str) -> list[Namespace]:
+            return [
+                item for item in self.namespaces
+                if not members[item.id] and item.before_block == block_id and item.id not in opened
+            ]
+
+        for block in current:
+            for item in empties_before(block.id):
+                opened.add(item.id)
+                items.append(("ns", item, []))
+            if block.namespace_id in known:
+                if block.namespace_id not in opened:
+                    opened.add(block.namespace_id)
+                    items.append(("ns", known[block.namespace_id], members[block.namespace_id]))
+                continue
+            items.append(("card", None, [block]))
+        for item in self.namespaces:
+            if item.id in opened:
+                continue
+            opened.add(item.id)
+            items.append(("ns", item, members.get(item.id) or []))
+        return items
+
+    def _flatten_flow(self, items: list[tuple]) -> list[Block]:
+        blocks = []
+        for kind, _namespace, group in items:
+            if kind == "card":
+                blocks.extend(group)
+            else:
+                blocks.extend(group)
+        return blocks
+
+    def _assign_empty_slots(self, items: list[tuple]) -> None:
+        for index, (kind, namespace, group) in enumerate(items):
+            if kind != "ns":
+                continue
+            if group:
+                namespace.before_block = ""
+                continue
+            following = ""
+            for later_kind, _later_namespace, later_group in items[index + 1:]:
+                if later_group:
+                    following = later_group[0].id
+                    break
+            namespace.before_block = following
 
     def delete(self, block_id: str) -> None:
         block = self.block(block_id)

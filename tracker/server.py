@@ -95,6 +95,8 @@ class App:
                     archive.remove_namespace(str(body.get("namespace") or ""))
                 elif op == "place":
                     archive.place(str(body.get("id") or ""), str(body.get("namespace") or ""))
+                elif op == "swap":
+                    archive.swap_namespaces(str(body.get("namespace") or ""), str(body.get("target") or ""))
                 else:
                     raise ArchiveError(f"unknown namespace action {op}")
             elif action == "model":
