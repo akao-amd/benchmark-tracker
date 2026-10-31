@@ -152,6 +152,19 @@ def _add_refs(block, paths: list[str]) -> None:
     block.refs = lift_refs(list(block.refs) + list(paths))
 
 
+def _point_key(point: Point) -> tuple[int, int, int, int]:
+    return (point.input_len, point.output_len, point.concurrency, point.run)
+
+
+def _split_points(old: Block, block: Block) -> tuple[list[Point], list[Point]]:
+    held = {_point_key(point) for point in old.points}
+    fresh = []
+    overlap = []
+    for point in block.points:
+        (overlap if _point_key(point) in held else fresh).append(point)
+    return fresh, overlap
+
+
 @dataclass
 class Point:
     input_len: int
@@ -559,6 +572,9 @@ class Archive:
             if kind == "overwrite":
                 planned.append(("overwrite", block, block.label))
                 continue
+            if kind == "complement":
+                planned.append(("complement", block, block.label))
+                continue
             if kind == "rename":
                 new_label = _text(action.get("label", ""), "rename").strip()
                 if not new_label:
@@ -570,14 +586,18 @@ class Archive:
                     continue
                 planned.append(("add", block, new_label))
                 continue
+            fresh, overlap = _split_points(existing[block.label], block)
+            if not overlap:
+                planned.append(("complement", block, block.label))
+                continue
             collisions.append({
                 "label": block.label,
                 "suggestion": suggest_label(block.label, taken | set(incoming)),
-                "message": "already in the workspace",
+                "message": f"{len(overlap)} row" + (" is" if len(overlap) == 1 else "s are") + f" already there, {len(fresh)} " + ("is" if len(fresh) == 1 else "are") + " new",
             })
         claimed = set(existing)
         for kind, _block, label in planned:
-            if kind == "overwrite":
+            if kind in ("overwrite", "complement"):
                 continue
             if label in claimed:
                 collisions.append({
@@ -609,11 +629,34 @@ class Archive:
                     if value and not old.attr(key):
                         old.attributes[key] = value
                 continue
+            if kind == "complement":
+                self._complement(existing[label], block)
+                continue
             block.label = label
             self.blocks.append(block)
         self._replace_notices(notices, blocks)
         if model_hint and not self.model:
             self.model = model_hint
+
+    def _complement(self, old: Block, block: Block) -> None:
+        """Add rows the block does not already have. A row that is already there stays."""
+        fresh, overlap = _split_points(old, block)
+        for point in fresh:
+            old.points.append(point)
+        _add_refs(old, block.refs or ([block.ingested_from] if block.ingested_from else []))
+        for key, value in block.attributes.items():
+            if value and not old.attr(key):
+                old.attributes[key] = value
+        runs = old.runs()
+        if runs and old.active_run not in runs:
+            old.active_run = runs[0]
+        added = len(fresh)
+        kept = len(overlap)
+        self.add_notice(
+            old.label,
+            f"{old.label}: added {added} measurement" + ("" if added == 1 else "s") + f"; {kept} already there stayed",
+            "note",
+        )
 
     def adopt(self, block_id: str, blocks: list[Block], notices: list[dict], model_hint: str) -> None:
         """Add scanned measurements to one existing block. The name in the file is not used."""

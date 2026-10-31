@@ -113,7 +113,7 @@ td.miss { color: #8d1d1d; }
 .merge-options { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .merge-options label { display: flex; gap: 6px; align-items: center; }
 .choice { display: grid; grid-template-columns: 1fr; gap: 4px; padding: 8px 0; border-top: 1px solid #eee; }
-.choice .opts { display: flex; gap: 12px; align-items: center; }
+.choice .opts { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .choice input[type="text"] { flex: 1; border: 1px solid #c8c8c8; border-radius: 4px; padding: 4px 6px; }
 .figure { margin: 0 0 22px; }
 .figure svg { width: 100%; height: auto; background: #404040; border-radius: 6px; cursor: copy; }

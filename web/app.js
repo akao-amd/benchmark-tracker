@@ -203,11 +203,18 @@ function openCollision(collisions, notices) {
   list.replaceChildren();
   collisions.forEach((item) => {
     const rename = h("input", { type: "text", value: item.suggestion, "data-label": item.label });
-    const over = h("input", { type: "radio", name: "c-" + item.label, value: "overwrite", checked: "checked" });
+    const fill = h("input", { type: "radio", name: "c-" + item.label, value: "complement", checked: "checked" });
+    const over = h("input", { type: "radio", name: "c-" + item.label, value: "overwrite" });
     const ren = h("input", { type: "radio", name: "c-" + item.label, value: "rename" });
     list.append(h("div", { class: "choice" }, [
       h("strong", { text: item.label }),
-      h("div", { class: "opts" }, [over, h("span", { text: "Overwrite" }), ren, h("span", { text: "Rename" }), rename]),
+      h("p", { class: "hint", text: item.message || "" }),
+      h("div", { class: "opts" }, [
+        fill, h("span", { text: "Complement" }),
+        over, h("span", { text: "Overwrite" }),
+        ren, h("span", { text: "Rename" }),
+        rename,
+      ]),
     ]));
   });
   const notes = document.getElementById("collision-notes");
@@ -1346,9 +1353,10 @@ function wire() {
       const picked = choice.querySelector("input[type=radio]:checked");
       const rename = choice.querySelector("input[type=text]");
       const label = rename.getAttribute("data-label");
-      resolutions[label] = picked.value === "rename"
+      const action = picked ? picked.value : "complement";
+      resolutions[label] = action === "rename"
         ? { action: "rename", label: rename.value }
-        : { action: "overwrite" };
+        : { action };
     });
     ingest(state.pendingPath, resolutions);
   });

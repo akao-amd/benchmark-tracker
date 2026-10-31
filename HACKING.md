@@ -61,7 +61,7 @@ Logs are matched case-insensitively on three lines: `Total token throughput (tok
 
 Dropping a directory on the empty board creates one block per filename label. Dropping it on a card adopts every loaded point into that card. The filename label is ignored. A key the card already has stays as it is. Empty attribute keys on the receiving block are filled. Label, GPU divisor, baseline, and chart membership stay on the receiving block.
 
-A label that already exists is a 409. Nothing is written until the client sends `overwrite` or `rename`. Overwrite replaces points and sources and fills only empty attributes. The selected run is kept when that run still exists. Rename suggests `label (2)`, then `(3)`.
+A label that already exists, and whose rows are all new, is filled in. The rows already in the block stay, and the new directory is added to Ref. A label whose rows overlap is a 409. Nothing is written until the client sends `complement`, `overwrite`, or `rename`. Complement is the same fill-in, and a row that is already there stays. Overwrite replaces points and sources and fills only empty attributes. The selected run is kept when that run still exists. Rename suggests `label (2)`, then `(3)`.
 
 A `.bta` dropped as results is refused. Import it instead. Import replaces the working archive immediately. Export `.bta` downloads a copy and does not write that copy back onto the imported path.
 

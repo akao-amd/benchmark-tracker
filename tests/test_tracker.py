@@ -219,6 +219,28 @@ class ModelTest(unittest.TestCase):
             fresh.apply_scan(incoming, more, {"tp1": {"action": "rename", "label": "tp1 (2)"}}, hint)
             self.assertEqual([block.label for block in fresh.blocks], ["tp1", "tp1 (2)"])
 
+    def test_a_later_directory_fills_in_the_missing_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "c64"
+            second = Path(tmp) / "rest"
+            first.mkdir()
+            second.mkdir()
+            write_bench(first, "srv", 70000, 300, 64)
+            for conc in (4, 8, 16, 32):
+                write_bench(second, "srv", 70000, 300, conc)
+            blocks, notices, model = scan_path(first)
+            archive = Archive(blocks=blocks, notices=notices, model=model)
+            incoming, more, hint = scan_path(second)
+            archive.apply_scan(incoming, more, None, hint)
+            self.assertEqual(sorted(point.concurrency for point in archive.blocks[0].points), [4, 8, 16, 32, 64])
+            self.assertEqual(len(archive.blocks), 1)
+            again, more, hint = scan_path(second)
+            with self.assertRaises(Exception) as caught:
+                archive.apply_scan(again, more, None, hint)
+            self.assertEqual(caught.exception.collisions[0]["label"], "srv")
+            archive.apply_scan(again, more, {"srv": {"action": "complement"}}, hint)
+            self.assertEqual(sorted(point.concurrency for point in archive.blocks[0].points), [4, 8, 16, 32, 64])
+
     def test_namespace_prefixes_the_name_outside_the_group(self):
         with tempfile.TemporaryDirectory() as tmp:
             write_bench(tmp, "MI450_MC_HAMMER_B0_TP1", 1024, 1024, 4)
