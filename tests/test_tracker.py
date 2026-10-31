@@ -285,6 +285,32 @@ class ModelTest(unittest.TestCase):
         self.assertEqual(empty.before_block, "a1")
         self.assertEqual([block.label for block in loaded.blocks], ["loose", "B1", "A1"])
 
+    def test_moving_a_block_leaves_namespace_order_alone(self):
+        archive = Archive(blocks=[
+            Block(id="loose", label="loose"),
+            Block(id="a1", label="A1"),
+            Block(id="b1", label="B1"),
+        ])
+        archive.add_namespace("A")
+        archive.add_namespace("B")
+        archive.add_namespace("E")
+        names = {item.name: item for item in archive.namespaces}
+        archive.blocks[1].namespace_id = names["A"].id
+        archive.blocks[2].namespace_id = names["B"].id
+        archive.swap_namespaces(names["A"].id, names["E"].id)
+
+        def names_in_flow():
+            current = [block for block in archive.blocks if not block.retired]
+            return [item[1].name for item in archive._flow_items(current) if item[0] == "ns"]
+
+        parked = names_in_flow()
+        archive.place("loose", names["E"].id)
+        self.assertEqual(names_in_flow(), parked)
+        self.assertEqual(archive.block("loose").namespace_id, names["E"].id)
+        archive.place("b1", "")
+        self.assertEqual(names_in_flow(), parked)
+        self.assertEqual(archive.block("b1").namespace_id, "")
+
     def test_shared_baseline_file_becomes_a_choice_on_each_block(self):
         with tempfile.TemporaryDirectory() as tmp:
             write_bench(tmp, "base", 1024, 1024, 4)

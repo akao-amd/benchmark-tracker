@@ -100,7 +100,12 @@ td.miss { color: #8d1d1d; }
 #menu { position: fixed; z-index: 7; min-width: 160px; max-width: 420px; padding: 4px; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.08); }
 #menu button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 8px; }
 #menu button:hover { background: #f6f6f4; }
+#menu button:disabled { color: #aaa; }
 #menu .hint { margin: 4px 8px; }
+#menu .row { position: relative; }
+#menu .flyout { display: none; position: absolute; top: -5px; left: calc(100% + 4px); min-width: 180px; max-width: 320px; padding: 4px; background: #fff; border: 1px solid #ddd; border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.08); }
+#menu .flyout.left { left: auto; right: calc(100% + 4px); }
+#menu .row:hover > .flyout, #menu .row.open > .flyout { display: block; }
 #modal { position: fixed; inset: 0; background: rgba(0,0,0,.28); display: flex; align-items: center; justify-content: center; z-index: 6; }
 #collision-form, #merge-form, #onedrive-form { width: min(560px, calc(100vw - 32px)); background: #fff; border-radius: 8px; padding: 16px; }
 .stack { display: block; margin: 8px 0 4px; }

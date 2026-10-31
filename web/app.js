@@ -647,8 +647,36 @@ function openMenu(block, x, y) {
     closeMenu();
     retireBlock(block);
   });
-  menu.append(ref, retire);
+  const move = h("div", { class: "row" });
+  const moveButton = h("button", { type: "button", text: "Move to…" });
+  const flyout = h("div", { class: "flyout" });
+  const namespaces = state.workspace.namespaces || [];
+  if (!namespaces.length) flyout.append(h("p", { class: "hint", text: "No namespace yet." }));
+  namespaces.forEach((item) => {
+    const choice = h("button", { type: "button", text: item.name });
+    if ((block.namespace_id || "") === item.id) choice.disabled = true;
+    choice.addEventListener("click", (event) => {
+      event.stopPropagation();
+      closeMenu();
+      assignNamespace(block.id, item.id);
+    });
+    flyout.append(choice);
+  });
+  moveButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const open = move.classList.toggle("open");
+    if (open) placeFlyout(flyout, moveButton);
+  });
+  move.addEventListener("mouseenter", () => placeFlyout(flyout, moveButton));
+  move.append(moveButton, flyout);
+  menu.append(ref, move, retire);
   placeMenu(menu, x, y);
+}
+
+function placeFlyout(flyout, anchor) {
+  flyout.classList.remove("left");
+  const space = window.innerWidth - anchor.getBoundingClientRect().right;
+  if (space < flyout.offsetWidth + 12) flyout.classList.add("left");
 }
 
 function showRefs(block) {

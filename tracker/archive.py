@@ -818,16 +818,26 @@ class Archive:
         self.namespaces = [item for item in self.namespaces if item.id != namespace_id]
 
     def place(self, block_id: str, namespace_id: str) -> None:
-        """Move a block into a namespace, or back onto the board when namespace_id is empty."""
+        """Move a block into a namespace, or back onto the board when namespace_id is empty.
+
+        Groups stay in the order they already have. The card moves; the groups do not.
+        """
         block = self.block(block_id)
         if not namespace_id:
             if not block.namespace_id:
                 return
+            self._retarget_anchors(block)
+            self._pin_if_empty(block.namespace_id, block.id, follow_leaver=True)
             block.label = self.effective_label(block)
             block.namespace_id = ""
             return
         item = self._namespace(namespace_id)
-        label = self.effective_label(block) if block.namespace_id and block.namespace_id != item.id else block.label
+        if block.namespace_id == item.id:
+            return
+        self._retarget_anchors(block)
+        if block.namespace_id:
+            self._pin_if_empty(block.namespace_id, block.id, follow_leaver=False)
+        label = self.effective_label(block) if block.namespace_id else block.label
         prefix = item.name + "_"
         if label.startswith(prefix):
             label = label[len(prefix):]
@@ -839,16 +849,64 @@ class Archive:
         block.namespace_id = item.id
         self._cluster(block)
 
+    def _retarget_anchors(self, block: Block) -> None:
+        """Keep an empty group in front of the card it was parked on, once that card moves."""
+        index = self.blocks.index(block)
+        later = ""
+        for other in self.blocks[index + 1:]:
+            if not other.retired:
+                later = other.id
+                break
+        for item in self.namespaces:
+            if item.before_block == block.id:
+                item.before_block = later
+
+    def _pin_if_empty(self, namespace_id: str, leaving_id: str, follow_leaver: bool) -> None:
+        """An emptied group keeps the slot it had, instead of falling to the end."""
+        namespace = self._namespace(namespace_id)
+        remaining = [
+            other for other in self.blocks
+            if not other.retired and other.namespace_id == namespace_id and other.id != leaving_id
+        ]
+        if remaining:
+            return
+        if follow_leaver:
+            namespace.before_block = leaving_id
+            return
+        current = [other for other in self.blocks if not other.retired]
+        items = self._flow_items(current)
+        following = ""
+        seen = False
+        for kind, item, group in items:
+            if kind == "ns" and item.id == namespace_id:
+                seen = True
+                continue
+            if seen and group:
+                following = group[0].id
+                break
+        namespace.before_block = following
+
     def _cluster(self, block: Block) -> None:
+        namespace = self._namespace(block.namespace_id)
         siblings = [
             other for other in self.blocks
-            if other.namespace_id == block.namespace_id and other.id != block.id
+            if not other.retired and other.namespace_id == block.namespace_id and other.id != block.id
         ]
+        anchor = namespace.before_block
+        previous = self.blocks.index(block)
         self.blocks = [other for other in self.blocks if other.id != block.id]
-        if not siblings:
-            self.blocks.append(block)
-            return
-        self.blocks.insert(self.blocks.index(siblings[-1]) + 1, block)
+        if siblings:
+            self.blocks.insert(self.blocks.index(siblings[-1]) + 1, block)
+        elif anchor and anchor != block.id:
+            try:
+                index = next(i for i, other in enumerate(self.blocks) if other.id == anchor)
+            except StopIteration:
+                self.blocks.append(block)
+            else:
+                self.blocks.insert(index, block)
+        else:
+            self.blocks.insert(min(previous, len(self.blocks)), block)
+        namespace.before_block = ""
 
     def swap_namespaces(self, source_id: str, target_id: str) -> None:
         """Trade two groups on the board. Blocks inside them stay put, and nothing merges."""
