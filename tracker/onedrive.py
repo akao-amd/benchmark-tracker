@@ -295,12 +295,24 @@ def _write_plan(token: str, root: str, session_id: str, title: str, plan: dict) 
         except OneDriveError:
             pass
     for chart in plan["charts"]:
+        source = _local_range(title, chart["source"])
         created = _excel(
             token, "POST", f"{sheet}/charts/add",
-            {"type": "XYScatterLines", "sourceData": chart["source"], "seriesBy": "Columns"},
+            {"type": "XYScatterLines", "sourceData": source, "seriesBy": "Columns"},
             session=session_id,
         )
         name = urllib.parse.quote(created.get("name") or "", safe="")
+        if name:
+            # charts/add records the series as another workbook. Pointing the
+            # chart at this sheet again is what stops Excel recovering that link.
+            try:
+                _excel(
+                    token, "POST", f"{sheet}/charts/{name}/setData",
+                    {"sourceData": source, "seriesBy": "Columns"},
+                    session=session_id,
+                )
+            except OneDriveError:
+                pass
         if chart["title"] and name:
             _excel(token, "PATCH", f"{sheet}/charts/{name}/title", {"text": chart["title"], "visible": True}, session=session_id)
         if name:
@@ -315,6 +327,39 @@ def _write_plan(token: str, root: str, session_id: str, title: str, plan: dict) 
                     {"color": color},
                     session=session_id,
                 )
+    _drop_recovered_links(token, root, session_id, sheet)
+
+
+def _local_range(title: str, address: str) -> str:
+    """A chart source with no sheet name is stored as an external workbook."""
+    escaped = title.replace("'", "''")
+    return f"'{escaped}'!{address}"
+
+
+def _recovered_links(payload: dict) -> list[str]:
+    found = []
+    for item in payload.get("value") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        if name.startswith("RecoveredExternalLink"):
+            found.append(name)
+    return found
+
+
+def _drop_recovered_links(token: str, root: str, session_id: str, sheet: str) -> None:
+    """Excel recovers a chart's external series as RecoveredExternalLinkN on the next open."""
+    for collection in (root + "/names", sheet + "/names"):
+        try:
+            listed = _excel(token, "GET", collection, session=session_id)
+        except OneDriveError:
+            continue
+        for name in _recovered_links(listed):
+            ident = urllib.parse.quote(name, safe="")
+            try:
+                _excel(token, "DELETE", f"{collection}/{ident}", session=session_id)
+            except OneDriveError:
+                pass
 
 
 def _sheet_url(root: str, title: str) -> str:

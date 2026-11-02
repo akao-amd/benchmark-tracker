@@ -21,7 +21,9 @@ from tracker.onedrive import (
     OneDriveError,
     WorkbookLocked,
     _http_message,
+    _local_range,
     _open_for_edit,
+    _recovered_links,
     encode_share_url,
     file_name,
     remember_url,
@@ -587,6 +589,12 @@ class ModelTest(unittest.TestCase):
         url = (
             "https://amdcloud-my.sharepoint.com/:x:/r/personal/akao_amd_com/"
             "Documents/grok2_5_akao.xlsx?d=w886a660630a241a1970a8fabfc2e74ff&csf=1&web=1"
+        )
+        self.assertEqual(_local_range("bta-1102-2235", "AA1:AC4"), "'bta-1102-2235'!AA1:AC4")
+        self.assertEqual(_local_range("O'Brien", "A1"), "'O''Brien'!A1")
+        self.assertEqual(
+            _recovered_links({"value": [{"name": "RecoveredExternalLink1"}, {"name": "Rates"}, {"name": "RecoveredExternalLink2"}]}),
+            ["RecoveredExternalLink1", "RecoveredExternalLink2"],
         )
         self.assertEqual(file_name(url), "grok2_5_akao.xlsx")
         share = encode_share_url(url)
